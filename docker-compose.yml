@@ -1,0 +1,89 @@
+name: tienda-perfumes
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: tienda-perfumes-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: perfumes
+      POSTGRES_USER: perfumes
+      POSTGRES_PASSWORD: perfumes_dev_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - perfumes_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U perfumes -d perfumes"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: tienda-perfumes-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - perfumes_redis_data:/data
+
+  api:
+    build:
+      context: ./apps/api
+      dockerfile: Dockerfile.dev
+    container_name: tienda-perfumes-api
+    working_dir: /app
+    command: sh -c "npm install && npx prisma generate && npx prisma db push && npx tsx prisma/seed.ts && npm run start:dev"
+    environment:
+      PORT: 4000
+      DATABASE_URL: postgresql://perfumes:perfumes_dev_password@postgres:5432/perfumes?schema=public
+      REDIS_URL: redis://redis:6379
+      CORS_ORIGIN: http://localhost:3000
+      PUBLIC_API_URL: ${PUBLIC_API_URL:-http://localhost:4000}
+      WEB_APP_URL: ${WEB_APP_URL:-http://localhost:3000}
+      WHATSAPP_PHONE: ${WHATSAPP_PHONE:-529861000000}
+      MERCADOPAGO_ACCESS_TOKEN: ${MERCADOPAGO_ACCESS_TOKEN:-}
+      MERCADOPAGO_WEBHOOK_SECRET: ${MERCADOPAGO_WEBHOOK_SECRET:-}
+      STORAGE_ENDPOINT: ${STORAGE_ENDPOINT:-}
+      STORAGE_REGION: ${STORAGE_REGION:-auto}
+      STORAGE_BUCKET: ${STORAGE_BUCKET:-}
+      STORAGE_ACCESS_KEY: ${STORAGE_ACCESS_KEY:-}
+      STORAGE_SECRET_KEY: ${STORAGE_SECRET_KEY:-}
+      STORAGE_PUBLIC_URL: ${STORAGE_PUBLIC_URL:-}
+    ports:
+      - "4000:4000"
+    volumes:
+      - ./apps/api:/app
+      - api_node_modules:/app/node_modules
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+
+  web:
+    build:
+      context: ./apps/web
+      dockerfile: Dockerfile.dev
+    container_name: tienda-perfumes-web
+    working_dir: /app
+    command: sh -c "npm install && npm run dev"
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:4000/api/v1
+      WATCHPACK_POLLING: "true"
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./apps/web:/app
+      - web_node_modules:/app/node_modules
+      - web_next:/app/.next
+    depends_on:
+      - api
+
+volumes:
+  perfumes_postgres_data:
+  perfumes_redis_data:
+  api_node_modules:
+  web_node_modules:
+  web_next:
