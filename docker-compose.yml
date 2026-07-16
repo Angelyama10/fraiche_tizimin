@@ -33,16 +33,28 @@ services:
       context: ./apps/api
       dockerfile: Dockerfile.dev
     container_name: tienda-perfumes-api
+    init: true
     working_dir: /app
-    command: sh -c "npm install && npx prisma generate && npx prisma db push && npx tsx prisma/seed.ts && npm run start:dev"
+    command: sh -c "npm install && npx prisma generate && npx prisma migrate deploy && npx tsx prisma/seed.ts && npm run start:dev"
     environment:
+      NODE_ENV: development
       PORT: 4000
       DATABASE_URL: postgresql://perfumes:perfumes_dev_password@postgres:5432/perfumes?schema=public
+      DB_POOL_MAX: ${DB_POOL_MAX:-20}
       REDIS_URL: redis://redis:6379
       CORS_ORIGIN: http://localhost:3000
       PUBLIC_API_URL: ${PUBLIC_API_URL:-http://localhost:4000}
       WEB_APP_URL: ${WEB_APP_URL:-http://localhost:3000}
       WHATSAPP_PHONE: ${WHATSAPP_PHONE:-529861000000}
+      JWT_SECRET: ${JWT_SECRET:-dev-only-change-before-production}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
+      SMTP_FROM: ${SMTP_FROM:-}
+      ADMIN_NOTIFICATION_EMAIL: ${ADMIN_NOTIFICATION_EMAIL:-}
       MERCADOPAGO_ACCESS_TOKEN: ${MERCADOPAGO_ACCESS_TOKEN:-}
       MERCADOPAGO_WEBHOOK_SECRET: ${MERCADOPAGO_WEBHOOK_SECRET:-}
       STORAGE_ENDPOINT: ${STORAGE_ENDPOINT:-}
@@ -53,6 +65,18 @@ services:
       STORAGE_PUBLIC_URL: ${STORAGE_PUBLIC_URL:-}
     ports:
       - "4000:4000"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:4000/api/v1/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))",
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 20s
     volumes:
       - ./apps/api:/app
       - api_node_modules:/app/node_modules
@@ -67,6 +91,7 @@ services:
       context: ./apps/web
       dockerfile: Dockerfile.dev
     container_name: tienda-perfumes-web
+    init: true
     working_dir: /app
     command: sh -c "npm install && npm run dev"
     environment:
@@ -79,7 +104,8 @@ services:
       - web_node_modules:/app/node_modules
       - web_next:/app/.next
     depends_on:
-      - api
+      api:
+        condition: service_healthy
 
 volumes:
   perfumes_postgres_data:

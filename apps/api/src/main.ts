@@ -5,7 +5,29 @@ import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import helmet from 'helmet';
 import { AppModule } from './app.module';
 
+function validateProductionEnvironment() {
+  if (process.env.NODE_ENV !== 'production') return;
+
+  const required = [
+    'DATABASE_URL',
+    'JWT_SECRET',
+    'PUBLIC_API_URL',
+    'WEB_APP_URL',
+    'WHATSAPP_PHONE',
+    'MERCADOPAGO_ACCESS_TOKEN',
+    'MERCADOPAGO_WEBHOOK_SECRET',
+  ];
+  const missing = required.filter((name) => !process.env[name]);
+  if (missing.length) {
+    throw new Error(`Faltan variables obligatorias de produccion: ${missing.join(', ')}`);
+  }
+  if (process.env.JWT_SECRET === 'dev-only-change-before-production') {
+    throw new Error('JWT_SECRET de desarrollo no puede utilizarse en produccion.');
+  }
+}
+
 async function bootstrap() {
+  validateProductionEnvironment();
   const app = await NestFactory.create(AppModule);
 
   app.setGlobalPrefix('api/v1');

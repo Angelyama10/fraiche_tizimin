@@ -8,6 +8,7 @@ import {
   PromotionType,
 } from '@prisma/client';
 import { Pool } from 'pg';
+import { hash } from 'bcrypt';
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 const prisma = new PrismaClient({ adapter: new PrismaPg(pool) });
@@ -35,7 +36,7 @@ type SeedProduct = {
 async function upsertCategory(slug: string, name: string, parentId?: string) {
   return prisma.category.upsert({
     where: { slug },
-    update: { name, parentId, isActive: true },
+    update: {},
     create: { slug, name, parentId, isActive: true },
   });
 }
@@ -50,16 +51,7 @@ async function seedProduct(productData: SeedProduct, locationId: string) {
 
   const product = await prisma.product.upsert({
     where: { slug: productData.slug },
-    update: {
-      name: productData.name,
-      shortDescription: productData.shortDescription,
-      description: productData.description,
-      line: productData.line,
-      brandId: brand.id,
-      status: ProductStatus.ACTIVE,
-      isFeatured: productData.isFeatured ?? false,
-      isNew: productData.isNew ?? false,
-    },
+    update: {},
     create: {
       slug: productData.slug,
       name: productData.name,
@@ -99,14 +91,7 @@ async function seedProduct(productData: SeedProduct, locationId: string) {
 
   const variant = await prisma.productVariant.upsert({
     where: { sku: productData.sku },
-    update: {
-      name: productData.variantName,
-      concentrationLabel: productData.concentrationLabel,
-      concentrationPercent: productData.concentrationPercent,
-      volumeMl: productData.volumeMl,
-      catalogPriceCents: productData.catalogPriceCents,
-      isActive: true,
-    },
+    update: {},
     create: {
       productId: product.id,
       sku: productData.sku,
@@ -123,11 +108,7 @@ async function seedProduct(productData: SeedProduct, locationId: string) {
     where: {
       variantId_locationId: { variantId: variant.id, locationId },
     },
-    update: {
-      onHand: productData.stock,
-      available: productData.stock,
-      reserved: 0,
-    },
+    update: {},
     create: {
       variantId: variant.id,
       locationId,
@@ -141,6 +122,27 @@ async function seedProduct(productData: SeedProduct, locationId: string) {
 }
 
 async function main() {
+  const adminEmail = process.env.ADMIN_EMAIL?.trim().toLowerCase();
+  const adminPassword = process.env.ADMIN_PASSWORD;
+  if (adminEmail && adminPassword) {
+    await prisma.user.upsert({
+      where: { email: adminEmail },
+      update: {
+        name: 'Administrador Fraiche',
+        passwordHash: await hash(adminPassword, 12),
+        role: 'ADMIN',
+        isActive: true,
+      },
+      create: {
+        email: adminEmail,
+        name: 'Administrador Fraiche',
+        passwordHash: await hash(adminPassword, 12),
+        role: 'ADMIN',
+        isActive: true,
+      },
+    });
+  }
+
   const policies = [
     [ProductLine.DESIGNER_CLASSIC, PricingMode.CATALOG, null],
     [ProductLine.DESIGNER_37, PricingMode.CATALOG, null],
@@ -152,7 +154,7 @@ async function main() {
   for (const [line, pricingMode, fixedPriceCents] of policies) {
     await prisma.linePricingPolicy.upsert({
       where: { line },
-      update: { pricingMode, fixedPriceCents, isActive: true },
+      update: {},
       create: { line, pricingMode, fixedPriceCents, isActive: true },
     });
   }
@@ -166,7 +168,7 @@ async function main() {
   ]) {
     await prisma.brand.upsert({
       where: { slug },
-      update: { name },
+      update: {},
       create: { slug, name },
     });
   }
@@ -196,14 +198,14 @@ async function main() {
   ]) {
     await prisma.scentFamily.upsert({
       where: { slug },
-      update: { name },
+      update: {},
       create: { slug, name },
     });
   }
 
   const location = await prisma.storeLocation.upsert({
     where: { slug: 'tizimin-centro' },
-    update: { name: 'Fraiche Tizimin', isDefault: true, isActive: true },
+    update: {},
     create: {
       slug: 'tizimin-centro',
       name: 'Fraiche Tizimin',
@@ -307,10 +309,7 @@ async function main() {
 
   await prisma.paymentInstruction.upsert({
     where: { method: PaymentMethod.BANK_TRANSFER },
-    update: {
-      title: 'Transferencia bancaria',
-      instructions: 'Realiza la transferencia y adjunta tu comprobante. La orden se confirma despues de la revision.',
-    },
+    update: {},
     create: {
       method: PaymentMethod.BANK_TRANSFER,
       title: 'Transferencia bancaria',
@@ -321,10 +320,7 @@ async function main() {
 
   await prisma.paymentInstruction.upsert({
     where: { method: PaymentMethod.CASH },
-    update: {
-      title: 'Pago en efectivo',
-      instructions: 'Paga al recoger tu pedido en Fraiche Tizimin.',
-    },
+    update: {},
     create: {
       method: PaymentMethod.CASH,
       title: 'Pago en efectivo',
@@ -338,7 +334,7 @@ async function main() {
 
   const promotion = await prisma.promotion.upsert({
     where: { slug: 'bienvenida-fraiche' },
-    update: { startsAt: now, endsAt, isActive: true },
+    update: {},
     create: {
       slug: 'bienvenida-fraiche',
       code: 'FRAICHE10',

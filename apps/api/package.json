@@ -5,9 +5,10 @@
   "scripts": {
     "build": "nest build",
     "start": "node dist/main",
-    "start:dev": "nest start --watch",
+    "start:dev": "node --watch --enable-source-maps --require ts-node/register src/main.ts",
     "prisma:generate": "prisma generate",
     "prisma:push": "prisma db push",
+    "prisma:deploy": "prisma migrate deploy",
     "prisma:studio": "prisma studio",
     "db:seed": "tsx prisma/seed.ts"
   },
@@ -15,7 +16,10 @@
     "@nestjs/common": "latest",
     "@nestjs/config": "latest",
     "@nestjs/core": "latest",
+    "@nestjs/jwt": "latest",
+    "@nestjs/passport": "latest",
     "@nestjs/platform-express": "latest",
+    "@nestjs/schedule": "latest",
     "@nestjs/swagger": "latest",
     "@nestjs/throttler": "latest",
     "@prisma/adapter-pg": "latest",
@@ -24,8 +28,12 @@
     "@aws-sdk/s3-request-presigner": "latest",
     "class-transformer": "latest",
     "class-validator": "latest",
+    "bcrypt": "latest",
     "helmet": "latest",
     "mercadopago": "latest",
+    "nodemailer": "latest",
+    "passport": "latest",
+    "passport-jwt": "latest",
     "pg": "latest",
     "reflect-metadata": "latest",
     "rxjs": "latest"
@@ -35,6 +43,9 @@
     "@nestjs/schematics": "latest",
     "@nestjs/testing": "latest",
     "@types/node": "latest",
+    "@types/bcrypt": "latest",
+    "@types/nodemailer": "latest",
+    "@types/passport-jwt": "latest",
     "@types/pg": "latest",
     "prisma": "latest",
     "ts-node": "latest",
@@ -43,5 +54,8 @@
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"
+  },
+  "overrides": {
+    "@hono/node-server": "1.19.13"
   }
 }

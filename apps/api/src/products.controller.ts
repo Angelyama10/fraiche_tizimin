@@ -1,5 +1,5 @@
 import { Controller, Get, Param, Query } from '@nestjs/common';
-import { ProductKind } from '@prisma/client';
+import { ProductQueryDto, SuggestionQueryDto } from './product-query.dto';
 import { ProductsService } from './products.service';
 
 @Controller('products')
@@ -7,8 +7,13 @@ export class ProductsController {
   constructor(private readonly products: ProductsService) {}
 
   @Get()
-  findAll(@Query('q') query?: string, @Query('kind') kind?: ProductKind) {
-    return this.products.findAll(query, kind);
+  findAll(@Query() query: ProductQueryDto) {
+    return this.products.findAll(query);
+  }
+
+  @Get('search/suggestions')
+  suggestions(@Query() query: SuggestionQueryDto) {
+    return this.products.suggestions(query);
   }
 
   @Get(':slug')

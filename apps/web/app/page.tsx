@@ -6,11 +6,14 @@ import './page.css';
 type Product = {
   id: string;
   name: string;
-  brand?: string | null;
-  kind: string;
-  fixedPriceCents?: number | null;
-  imageUrl?: string | null;
-  variants: Array<{ priceCents?: number | null; presentationMl: number }>;
+  brand?: { name: string } | null;
+  line: string;
+  images: Array<{ url: string; altText: string }>;
+  variants: Array<{ priceCents?: number | null; volumeMl: number | null }>;
+};
+
+type ProductResponse = {
+  items: Product[];
 };
 
 const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:4000/api/v1';
@@ -22,7 +25,7 @@ export default function HomePage() {
   useEffect(() => {
     fetch(`${apiUrl}/products`)
       .then((response) => response.json())
-      .then(setProducts)
+      .then((response: ProductResponse) => setProducts(response.items))
       .finally(() => setLoading(false));
   }, []);
 
@@ -46,14 +49,14 @@ export default function HomePage() {
         {!loading && products.length === 0 && <p>Aún no hay productos cargados.</p>}
         {products.map((product) => (
           <article className="product" key={product.id}>
-            <div className="productImage">{product.imageUrl ? 'Imagen' : 'Sin imagen'}</div>
+            <div className="productImage">{product.images[0] ? 'Imagen' : 'Sin imagen'}</div>
             <div className="productInfo">
-              <span className="kind">{product.kind}</span>
+              <span className="kind">{product.line}</span>
               <h2>{product.name}</h2>
-              <p>{product.brand ?? 'Fragancia'}</p>
+              <p>{product.brand?.name ?? 'Fragancia'}</p>
               <strong>
-                {(product.fixedPriceCents ?? product.variants[0]?.priceCents)
-                  ? `$${((product.fixedPriceCents ?? product.variants[0]?.priceCents ?? 0) / 100).toFixed(2)} MXN`
+                {product.variants[0]?.priceCents
+                  ? `$${(product.variants[0].priceCents / 100).toFixed(2)} MXN`
                   : 'Consultar precio'}
               </strong>
               <button className="addButton" type="button">Agregar al carrito</button>
