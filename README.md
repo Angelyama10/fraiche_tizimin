@@ -18,6 +18,24 @@ docker compose up --build
 - PostgreSQL: localhost:5432
 - Redis: localhost:6379
 
+## Experiencia frontend
+
+La tienda usa Next.js App Router, estado de carrito y sesion en React, animaciones con Motion, iconos Lucide e imagenes optimizadas por Next.js en AVIF/WebP. El diseno es mobile-first y consume el catalogo, existencias, precios y promociones directamente desde la API.
+
+```text
+/                         Portada, novedades, destacados, aromas, oferta y ubicacion
+/productos                Catalogo, buscador predictivo y filtros
+/productos/:slug          Detalle, variantes, existencia, favoritos y carrito
+/promociones              Ofertas vigentes
+/pedidos-especiales       Solicitud de aromas no disponibles
+/cuenta                   Registro, acceso, perfil, direcciones, favoritos e historial
+/carrito                  Checkout autenticado y metodos de pago
+/pedidos/:token           Estado del pedido, envio y codigo de rastreo
+/admin                    Catalogo, inventario, pedidos, precios y promociones
+```
+
+Los recursos editoriales locales estan en `apps/web/public/images`. Para personalizar la tienda antes de produccion, configura en `.env` la URL publica, WhatsApp y credenciales privadas, y sustituye la ubicacion, redes sociales y datos de contacto provisionales.
+
 ## Endpoints publicos
 
 ```text

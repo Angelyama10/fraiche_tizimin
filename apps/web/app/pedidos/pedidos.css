@@ -1,0 +1,438 @@
+.orderPage {
+  min-height: 84svh;
+  padding-bottom: 110px;
+  background: #f4f7f5;
+}
+
+.orderPage__top {
+  display: flex;
+  min-height: 58px;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 9px;
+}
+
+.orderPage__top a,
+.orderPage__top button {
+  display: inline-flex;
+  align-items: center;
+  border: 0;
+  background: transparent;
+  color: var(--emerald);
+  font-size: 9px;
+  font-weight: 800;
+  gap: 6px;
+}
+
+.orderHero {
+  padding: 45px 0;
+  background: var(--emerald);
+  color: var(--white);
+}
+
+.orderHero > div {
+  display: grid;
+  gap: 22px;
+}
+
+.orderHero .eyebrow {
+  color: var(--aqua);
+}
+
+.orderHero h1 {
+  margin: 8px 0 5px;
+  font-size: 44px;
+  line-height: 0.96;
+}
+
+.orderHero p {
+  margin: 0;
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 9px;
+}
+
+.orderHero > div > div:last-child {
+  display: flex;
+  align-items: flex-start;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.orderHero > div > div:last-child > strong {
+  font-family: var(--font-display), var(--font-display-fallback);
+  font-size: 28px;
+}
+
+.orderLayout {
+  display: grid;
+  padding-top: 34px;
+  gap: 20px;
+}
+
+.trackingSection,
+.orderProducts,
+.orderPayment,
+.orderAddress,
+.orderTotals {
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  padding: 20px;
+  background: var(--white);
+}
+
+.orderProducts {
+  margin-top: 20px;
+}
+
+.orderSectionHeading h2 {
+  margin: 5px 0 22px;
+  font-size: 31px;
+  line-height: 1;
+}
+
+.trackingTimeline {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+}
+
+.trackingTimeline > div {
+  position: relative;
+  display: flex;
+  align-items: center;
+  color: #a5aeaa;
+  text-align: center;
+  flex-direction: column;
+}
+
+.trackingTimeline > div > span {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  width: 42px;
+  height: 42px;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  background: var(--paper);
+}
+
+.trackingTimeline > div > strong {
+  max-width: 75px;
+  margin-top: 8px;
+  font-size: 7px;
+  line-height: 1.3;
+}
+
+.trackingTimeline > div > i {
+  position: absolute;
+  z-index: 0;
+  top: 20px;
+  left: 50%;
+  width: 100%;
+  height: 2px;
+  background: var(--line);
+}
+
+.trackingTimeline > div.isActive {
+  color: var(--emerald);
+}
+
+.trackingTimeline > div.isActive > span {
+  border-color: var(--emerald);
+  background: var(--mint);
+}
+
+.trackingTimeline > div.isActive > i {
+  background: var(--emerald);
+}
+
+.shipmentBox {
+  margin-top: 28px;
+  border-radius: 6px;
+  padding: 16px;
+  background: #eef6f3;
+}
+
+.shipmentBox > div:first-child {
+  display: grid;
+  align-items: center;
+  grid-template-columns: 28px 1fr auto;
+  gap: 7px;
+}
+
+.shipmentBox > div:first-child > span {
+  display: flex;
+  flex-direction: column;
+}
+
+.shipmentBox small {
+  color: var(--ink-soft);
+  font-size: 7px;
+}
+
+.shipmentBox strong {
+  font-size: 10px;
+}
+
+.shipmentBox > a {
+  display: inline-flex;
+  margin-top: 12px;
+  align-items: center;
+  color: var(--emerald);
+  font-size: 9px;
+  font-weight: 900;
+  gap: 5px;
+}
+
+.shipmentBox ol {
+  margin: 18px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.shipmentBox li {
+  display: grid;
+  min-height: 54px;
+  grid-template-columns: 18px 1fr;
+  gap: 7px;
+}
+
+.shipmentBox li > span {
+  width: 7px;
+  height: 7px;
+  margin-top: 6px;
+  border: 2px solid var(--emerald);
+  border-radius: 50%;
+}
+
+.shipmentBox li div {
+  display: flex;
+  flex-direction: column;
+}
+
+.shipmentBox li p {
+  margin: 3px 0 0;
+  color: var(--ink-soft);
+  font-size: 8px;
+}
+
+.orderProducts article {
+  display: grid;
+  min-height: 84px;
+  align-items: center;
+  border-top: 1px solid var(--line);
+  grid-template-columns: 62px 1fr auto;
+  gap: 11px;
+}
+
+.orderProducts article > div {
+  position: relative;
+  display: grid;
+  width: 56px;
+  height: 64px;
+  overflow: hidden;
+  place-items: center;
+  border-radius: 4px;
+  background: var(--mint);
+}
+
+.orderProducts article img {
+  object-fit: cover;
+}
+
+.orderProducts article > span {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+}
+
+.orderProducts article > span strong {
+  overflow: hidden;
+  font-family: var(--font-display), var(--font-display-fallback);
+  font-size: 17px;
+  line-height: 1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.orderProducts article small {
+  margin-top: 4px;
+  color: var(--ink-soft);
+  font-size: 7px;
+}
+
+.orderProducts article b {
+  font-size: 10px;
+}
+
+.orderAside {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.orderPayment h2 {
+  margin: 5px 0 10px;
+  font-size: 29px;
+}
+
+.orderPayment > p {
+  color: var(--ink-soft);
+  font-size: 9px;
+}
+
+.uploadProof {
+  display: flex;
+  min-height: 66px;
+  align-items: center;
+  border: 1px dashed var(--emerald);
+  border-radius: 5px;
+  padding: 10px 12px;
+  background: var(--mint);
+  color: var(--emerald);
+  gap: 9px;
+}
+
+.uploadProof span {
+  display: flex;
+  flex-direction: column;
+}
+
+.uploadProof strong {
+  font-size: 9px;
+}
+
+.uploadProof small {
+  font-size: 7px;
+}
+
+.uploadProof input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+}
+
+.orderAddress > svg {
+  margin-bottom: 13px;
+  color: var(--coral-dark);
+}
+
+.orderAddress h3 {
+  margin: 7px 0 5px;
+  font-size: 22px;
+}
+
+.orderAddress p {
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: 8px;
+}
+
+.orderTotals {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.orderTotals > span {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.orderTotals small {
+  color: var(--ink-soft);
+  font-size: 8px;
+}
+
+.orderTotals strong {
+  font-size: 9px;
+}
+
+.orderTotals > span:last-child {
+  margin-top: 5px;
+  border-top: 1px solid var(--line);
+  padding-top: 12px;
+}
+
+.orderTotals > span:last-child strong {
+  font-family: var(--font-display), var(--font-display-fallback);
+  font-size: 24px;
+}
+
+.cancelOrder {
+  align-self: center;
+  border: 0;
+  border-bottom: 1px solid currentColor;
+  padding: 2px 0;
+  background: transparent;
+  color: var(--coral-dark);
+  font-size: 8px;
+  font-weight: 800;
+}
+
+.orderAuth {
+  display: flex;
+  min-height: 70svh;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  flex-direction: column;
+}
+
+.orderAuth > svg {
+  color: var(--coral-dark);
+}
+
+.orderAuth h1 {
+  margin: 16px 0 8px;
+  font-size: 44px;
+}
+
+.orderAuth p {
+  color: var(--ink-soft);
+  font-size: 10px;
+}
+
+@media (min-width: 700px) {
+  .orderHero > div {
+    align-items: end;
+    grid-template-columns: 1fr auto;
+  }
+
+  .orderHero h1 {
+    font-size: 58px;
+  }
+
+  .orderHero > div > div:last-child {
+    align-items: flex-end;
+  }
+
+  .trackingSection,
+  .orderProducts,
+  .orderPayment,
+  .orderAddress,
+  .orderTotals {
+    padding: 28px;
+  }
+
+  .trackingTimeline > div > strong {
+    max-width: none;
+    font-size: 9px;
+  }
+}
+
+@media (min-width: 980px) {
+  .orderLayout {
+    align-items: start;
+    padding-top: 48px;
+    grid-template-columns: minmax(0, 1fr) 330px;
+    gap: 26px;
+  }
+
+  .orderAside {
+    position: sticky;
+    top: 100px;
+  }
+}

@@ -1,0 +1,210 @@
+.specialRequestPage {
+  min-height: 80svh;
+  padding: 64px 0 100px;
+  background: #eaf6f2;
+}
+
+.specialRequestHero {
+  display: grid;
+  gap: 46px;
+}
+
+.specialRequestHero > div:first-child h1 {
+  max-width: 650px;
+  margin: 12px 0 18px;
+  font-size: 52px;
+  line-height: 0.92;
+}
+
+.specialRequestHero > div:first-child > p {
+  max-width: 570px;
+  color: var(--ink-soft);
+  font-size: 12px;
+}
+
+.specialRequestHero ol {
+  max-width: 560px;
+  margin: 36px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.specialRequestHero li {
+  display: grid;
+  min-height: 68px;
+  align-items: center;
+  border-top: 1px solid var(--line-dark);
+  grid-template-columns: 42px 1fr;
+}
+
+.specialRequestHero li > span {
+  color: var(--coral-dark);
+  font-size: 9px;
+  font-weight: 900;
+}
+
+.specialRequestHero li div {
+  display: flex;
+  flex-direction: column;
+}
+
+.specialRequestHero li strong {
+  font-size: 11px;
+}
+
+.specialRequestHero li small {
+  color: var(--ink-soft);
+  font-size: 9px;
+}
+
+.specialRequestForm,
+.specialRequestSuccess {
+  border: 1px solid rgba(20, 35, 31, 0.11);
+  border-radius: 7px;
+  padding: 22px;
+  background: var(--white);
+  box-shadow: var(--shadow-soft);
+}
+
+.specialRequestForm__header {
+  display: flex;
+  margin-bottom: 24px;
+  align-items: center;
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 18px;
+  gap: 12px;
+}
+
+.specialRequestForm__header > svg {
+  color: var(--coral-dark);
+}
+
+.specialRequestForm__header h2 {
+  margin: 3px 0 0;
+  font-size: 28px;
+  line-height: 1;
+}
+
+.formField {
+  display: flex;
+  margin-bottom: 14px;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.formField > span {
+  font-size: 9px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.formField input,
+.formField select,
+.formField textarea {
+  width: 100%;
+  min-height: 48px;
+  border: 1px solid var(--line-dark);
+  border-radius: 5px;
+  padding: 0 12px;
+  outline: 0;
+  background: var(--paper);
+  font-size: 11px;
+}
+
+.formField textarea {
+  min-height: 105px;
+  padding-block: 11px;
+  resize: vertical;
+}
+
+.formField input:focus,
+.formField select:focus,
+.formField textarea:focus {
+  border-color: var(--emerald);
+  box-shadow: 0 0 0 3px rgba(13, 79, 67, 0.1);
+}
+
+.formGrid {
+  display: grid;
+}
+
+.formPrivacy {
+  display: block;
+  margin-top: 10px;
+  color: var(--ink-soft);
+  font-size: 8px;
+  text-align: center;
+}
+
+.specialRequestSuccess {
+  display: flex;
+  min-height: 520px;
+  align-items: center;
+  justify-content: center;
+  padding: 34px;
+  text-align: center;
+  flex-direction: column;
+}
+
+.specialRequestSuccess > span {
+  display: grid;
+  width: 64px;
+  height: 64px;
+  margin-bottom: 18px;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--mint);
+  color: var(--emerald);
+}
+
+.specialRequestSuccess h2 {
+  margin: 9px 0;
+  font-size: 42px;
+}
+
+.specialRequestSuccess > p:not(.eyebrow) {
+  color: var(--ink-soft);
+  font-size: 11px;
+}
+
+.specialRequestSuccess code {
+  display: block;
+  max-width: 100%;
+  margin: 10px 0 24px;
+  overflow-wrap: anywhere;
+  border: 1px dashed var(--emerald);
+  border-radius: 5px;
+  padding: 12px;
+  background: var(--mint);
+  font-size: 10px;
+}
+
+@media (min-width: 800px) {
+  .specialRequestPage {
+    padding: 96px 0 120px;
+  }
+
+  .specialRequestHero {
+    align-items: start;
+    grid-template-columns: 1.05fr 0.95fr;
+    gap: 80px;
+  }
+
+  .specialRequestHero > div:first-child {
+    position: sticky;
+    top: 110px;
+  }
+
+  .specialRequestHero > div:first-child h1 {
+    font-size: 74px;
+  }
+
+  .specialRequestForm {
+    padding: 32px;
+  }
+
+  .formGrid {
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+  }
+}

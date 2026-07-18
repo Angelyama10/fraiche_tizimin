@@ -1,0 +1,154 @@
+.promotionsHero {
+  padding: 82px 0 72px;
+  background: var(--magenta);
+  color: var(--white);
+}
+
+.promotionsHero h1 {
+  max-width: 780px;
+  margin: 14px 0 18px;
+  font-size: 54px;
+  line-height: 0.92;
+}
+
+.promotionsHero p {
+  max-width: 590px;
+  margin: 0;
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 12px;
+}
+
+.promotionsList {
+  display: flex;
+  flex-direction: column;
+}
+
+.promotionRow {
+  display: grid;
+  padding: 28px 0;
+  border-bottom: 1px solid var(--line-dark);
+  gap: 16px;
+}
+
+.promotionRow__number {
+  color: var(--coral-dark);
+  font-size: 10px;
+  font-weight: 900;
+}
+
+.promotionRow__content h2 {
+  margin: 9px 0 10px;
+  font-size: 37px;
+  line-height: 0.96;
+}
+
+.promotionRow__content > p {
+  max-width: 580px;
+  color: var(--ink-soft);
+  font-size: 11px;
+}
+
+.promotionRow__terms {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+}
+
+.promotionRow__terms span {
+  display: inline-flex;
+  align-items: center;
+  color: var(--emerald);
+  font-size: 9px;
+  font-weight: 800;
+  gap: 5px;
+}
+
+.promotionRow__action {
+  display: flex;
+  align-items: stretch;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.promotionCodeButton {
+  display: grid;
+  min-height: 64px;
+  align-items: center;
+  border: 1px dashed var(--emerald);
+  border-radius: 6px;
+  padding: 0 16px;
+  background: var(--mint);
+  text-align: left;
+  grid-template-columns: 1fr auto;
+}
+
+.promotionCodeButton span {
+  color: var(--emerald);
+  font-size: 8px;
+  font-weight: 900;
+  text-transform: uppercase;
+  grid-column: 1;
+}
+
+.promotionCodeButton strong {
+  font-size: 16px;
+  grid-column: 1;
+}
+
+.promotionCodeButton svg {
+  grid-row: 1 / 3;
+  grid-column: 2;
+}
+
+.automaticPromo {
+  display: inline-flex;
+  min-height: 50px;
+  align-items: center;
+  color: var(--emerald);
+  font-size: 10px;
+  font-weight: 800;
+  gap: 7px;
+}
+
+.promotionsEmpty {
+  display: flex;
+  min-height: 430px;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  flex-direction: column;
+}
+
+.promotionsEmpty > svg {
+  color: var(--coral-dark);
+}
+
+.promotionsEmpty h2 {
+  max-width: 530px;
+  margin: 18px 0 8px;
+  font-size: 40px;
+  line-height: 1;
+}
+
+.promotionsEmpty p {
+  color: var(--ink-soft);
+  font-size: 11px;
+}
+
+@media (min-width: 800px) {
+  .promotionsHero h1 {
+    font-size: 78px;
+  }
+
+  .promotionRow {
+    min-height: 280px;
+    align-items: center;
+    padding: 40px 0;
+    grid-template-columns: 45px 1fr 280px;
+    gap: 34px;
+  }
+
+  .promotionRow__content h2 {
+    font-size: 50px;
+  }
+}
