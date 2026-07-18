@@ -5,21 +5,33 @@ import {
   Headers,
   HttpCode,
   Param,
+  ParseEnumPipe,
   Post,
   Query,
+  Req,
+  UseGuards,
 } from '@nestjs/common';
 import { SkipThrottle } from '@nestjs/throttler';
 import { PaymentMethod } from '@prisma/client';
+import type { Request } from 'express';
+import { CustomerJwtAuthGuard } from './customer-auth.guard';
+import { AuthenticatedCustomer } from './customer-jwt.strategy';
 import { ConfirmTransferProofDto } from './payment.dto';
 import { PaymentsService } from './payments.service';
+
+type CustomerRequest = Request & { user: AuthenticatedCustomer };
 
 @Controller('payments')
 export class PaymentsController {
   constructor(private readonly payments: PaymentsService) {}
 
   @Post('mercado-pago/orders/:orderToken/preference')
-  createMercadoPagoPreference(@Param('orderToken') orderToken: string) {
-    return this.payments.createMercadoPagoPreference(orderToken);
+  @UseGuards(CustomerJwtAuthGuard)
+  createMercadoPagoPreference(
+    @Param('orderToken') orderToken: string,
+    @Req() request: CustomerRequest,
+  ) {
+    return this.payments.createMercadoPagoPreference(orderToken, request.user.customerId);
   }
 
   @SkipThrottle()
@@ -35,15 +47,17 @@ export class PaymentsController {
   }
 
   @Get('instructions/:method')
-  instructions(@Param('method') method: PaymentMethod) {
+  instructions(@Param('method', new ParseEnumPipe(PaymentMethod)) method: PaymentMethod) {
     return this.payments.instructions(method);
   }
 
   @Post('orders/:orderToken/transfer-proof')
+  @UseGuards(CustomerJwtAuthGuard)
   confirmTransferProof(
     @Param('orderToken') orderToken: string,
     @Body() input: ConfirmTransferProofDto,
+    @Req() request: CustomerRequest,
   ) {
-    return this.payments.confirmTransferProof(orderToken, input);
+    return this.payments.confirmTransferProof(orderToken, input, request.user.customerId);
   }
 }

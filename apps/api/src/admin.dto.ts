@@ -75,6 +75,12 @@ export class CreateProductVariantDto {
   @IsInt()
   @Min(0)
   initialStock!: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  lowStockThreshold?: number;
 }
 
 export class CreateProductDto {

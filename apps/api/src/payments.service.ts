@@ -54,9 +54,9 @@ export class PaymentsService {
     private readonly config: ConfigService,
   ) {}
 
-  async createMercadoPagoPreference(orderToken: string) {
-    const order = await this.prisma.order.findUnique({
-      where: { publicToken: orderToken },
+  async createMercadoPagoPreference(orderToken: string, customerId: string) {
+    const order = await this.prisma.order.findFirst({
+      where: { publicToken: orderToken, customerId },
       include: { items: true, payments: true },
     });
     if (!order) throw new NotFoundException('Orden no encontrada.');
@@ -211,9 +211,13 @@ export class PaymentsService {
     });
   }
 
-  async confirmTransferProof(orderToken: string, input: ConfirmTransferProofDto) {
-    const order = await this.prisma.order.findUnique({
-      where: { publicToken: orderToken },
+  async confirmTransferProof(
+    orderToken: string,
+    input: ConfirmTransferProofDto,
+    customerId: string,
+  ) {
+    const order = await this.prisma.order.findFirst({
+      where: { publicToken: orderToken, customerId },
       include: { payments: true },
     });
     if (!order || order.paymentMethod !== PaymentMethod.BANK_TRANSFER) {

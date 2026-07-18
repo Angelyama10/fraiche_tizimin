@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { JwtService } from '@nestjs/jwt';
 import { Interval } from '@nestjs/schedule';
 import { OutboxStatus, Prisma } from '@prisma/client';
 import nodemailer, { Transporter } from 'nodemailer';
@@ -23,6 +24,7 @@ export class OutboxService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly config: ConfigService,
+    private readonly jwt: JwtService,
   ) {}
 
   @Interval(5000)
@@ -87,7 +89,7 @@ export class OutboxService {
     const message = await this.buildMessage(event);
     await this.getTransporter().sendMail({
       from: this.config.getOrThrow<string>('SMTP_FROM'),
-      to: this.config.getOrThrow<string>('ADMIN_NOTIFICATION_EMAIL'),
+      to: message.to,
       subject: message.subject,
       text: message.text,
     });
@@ -99,6 +101,7 @@ export class OutboxService {
         where: { id: event.aggregateId },
       });
       return {
+        to: this.adminRecipient(),
         subject: `Nuevo pedido especial: ${request.requestedAroma}`,
         text: [
           `Cliente: ${request.customerName}`,
@@ -116,6 +119,10 @@ export class OutboxService {
         where: { id: event.aggregateId },
       });
       return {
+        to:
+          event.type === 'PAYMENT_APPROVED'
+            ? [this.adminRecipient(), order.customerEmail]
+            : this.adminRecipient(),
         subject:
           event.type === 'PAYMENT_APPROVED'
             ? `Pago aprobado: ${order.number}`
@@ -137,12 +144,144 @@ export class OutboxService {
         include: { order: true },
       });
       return {
+        to: this.adminRecipient(),
         subject: `Comprobante recibido: ${payment.order.number}`,
         text: `Se recibio un comprobante para la orden ${payment.order.number}. Requiere revision administrativa.`,
       };
     }
 
+    if (event.type === 'CUSTOMER_PASSWORD_RESET_REQUESTED') {
+      const request = await this.prisma.passwordResetRequest.findUniqueOrThrow({
+        where: { id: event.aggregateId },
+        include: { customer: true },
+      });
+      if (!request.customer.email || request.usedAt || request.expiresAt <= new Date()) {
+        throw new Error('La solicitud de recuperacion ya no esta vigente.');
+      }
+      const expiresIn = Math.max(
+        60,
+        Math.floor((request.expiresAt.getTime() - Date.now()) / 1000),
+      );
+      const token = await this.jwt.signAsync(
+        {
+          sub: request.customerId,
+          requestId: request.id,
+          tokenType: 'PASSWORD_RESET',
+        },
+        {
+          audience: 'fraiche-password-reset',
+          issuer: 'fraiche-api',
+          expiresIn,
+        },
+      );
+      const webAppUrl = this.config.getOrThrow<string>('WEB_APP_URL').replace(/\/$/, '');
+      return {
+        to: request.customer.email,
+        subject: 'Recupera tu cuenta de Fraiche Tizimin',
+        text: [
+          `Hola ${request.customer.firstName ?? ''},`,
+          'Recibimos una solicitud para cambiar tu contrasena.',
+          `${webAppUrl}/recuperar-contrasena?token=${encodeURIComponent(token)}`,
+          'El enlace vence en 30 minutos y solo puede utilizarse una vez.',
+          'Si no hiciste esta solicitud, puedes ignorar este correo.',
+        ].join('\n\n'),
+      };
+    }
+
+    if (event.type === 'CUSTOMER_EMAIL_VERIFICATION_REQUESTED') {
+      const customer = await this.prisma.customer.findUniqueOrThrow({
+        where: { id: event.aggregateId },
+      });
+      if (!customer.email || customer.emailVerifiedAt) {
+        throw new Error('La cuenta ya esta verificada o no tiene correo.');
+      }
+      const token = await this.jwt.signAsync(
+        {
+          sub: customer.id,
+          email: customer.email,
+          tokenType: 'EMAIL_VERIFICATION',
+        },
+        {
+          audience: 'fraiche-email-verification',
+          issuer: 'fraiche-api',
+          expiresIn: '24h',
+        },
+      );
+      const webAppUrl = this.config.getOrThrow<string>('WEB_APP_URL').replace(/\/$/, '');
+      return {
+        to: customer.email,
+        subject: 'Verifica tu correo de Fraiche Tizimin',
+        text: [
+          `Hola ${customer.firstName ?? ''},`,
+          'Confirma tu correo para proteger tus compras y recibir avisos de entrega.',
+          `${webAppUrl}/verificar-correo?token=${encodeURIComponent(token)}`,
+          'El enlace vence en 24 horas.',
+        ].join('\n\n'),
+      };
+    }
+
+    if (event.type === 'LOW_STOCK_ALERT') {
+      const alert = await this.prisma.inventoryAlert.findUniqueOrThrow({
+        where: { id: event.aggregateId },
+        include: {
+          inventoryLevel: {
+            include: { location: true, variant: { include: { product: true } } },
+          },
+        },
+      });
+      const level = alert.inventoryLevel;
+      return {
+        to: this.adminRecipient(),
+        subject: `Inventario bajo: ${level.variant.product.name}`,
+        text: [
+          `Producto: ${level.variant.product.name}`,
+          `Variante: ${level.variant.name} (${level.variant.sku})`,
+          `Ubicacion: ${level.location.name}`,
+          `Disponibles: ${level.available}`,
+          `Umbral configurado: ${level.lowStockThreshold}`,
+        ].join('\n'),
+      };
+    }
+
+    if (event.type === 'SHIPMENT_UPDATED') {
+      const payload =
+        event.payload && typeof event.payload === 'object' && !Array.isArray(event.payload)
+          ? event.payload
+          : {};
+      const shipmentId = 'shipmentId' in payload ? String(payload.shipmentId) : undefined;
+      const [order, shipment] = await Promise.all([
+        this.prisma.order.findUniqueOrThrow({ where: { id: event.aggregateId } }),
+        shipmentId
+          ? this.prisma.shipment.findUnique({ where: { id: shipmentId } })
+          : Promise.resolve(null),
+      ]);
+      return {
+        to: order.customerEmail,
+        subject: `Actualizacion de envio: ${order.number}`,
+        text: [
+          `Tu pedido ${order.number} cambio a ${shipment?.status ?? order.fulfillmentStatus}.`,
+          shipment ? `Paqueteria: ${shipment.carrier}` : '',
+          shipment ? `Guia: ${shipment.trackingNumber}` : '',
+          shipment?.trackingUrl ? `Rastreo: ${shipment.trackingUrl}` : '',
+        ]
+          .filter(Boolean)
+          .join('\n'),
+      };
+    }
+
+    if (event.type === 'ORDER_STATUS_UPDATED') {
+      const order = await this.prisma.order.findUniqueOrThrow({
+        where: { id: event.aggregateId },
+      });
+      return {
+        to: order.customerEmail,
+        subject: `Tu pedido ${order.number}: ${order.status}`,
+        text: `El estado de tu pedido ${order.number} ahora es ${order.status}. Puedes ver el detalle desde tu cuenta.`,
+      };
+    }
+
     return {
+      to: this.adminRecipient(),
       subject: `Evento Fraiche: ${event.type}`,
       text: `Tipo: ${event.type}\nEntidad: ${event.aggregateType}\nID: ${event.aggregateId}`,
     };
@@ -165,8 +304,11 @@ export class OutboxService {
   private isConfigured() {
     return Boolean(
       this.config.get<string>('SMTP_HOST') &&
-        this.config.get<string>('SMTP_FROM') &&
-        this.config.get<string>('ADMIN_NOTIFICATION_EMAIL'),
+        this.config.get<string>('SMTP_FROM'),
     );
+  }
+
+  private adminRecipient() {
+    return this.config.getOrThrow<string>('ADMIN_NOTIFICATION_EMAIL');
   }
 }

@@ -42,8 +42,12 @@ export class CatalogService {
         startsAt: true,
         endsAt: true,
         isFeatured: true,
+        placement: true,
+        requiresCode: true,
+        maximumDiscountCents: true,
+        priority: true,
       },
-      orderBy: [{ isFeatured: 'desc' }, { startsAt: 'desc' }],
+      orderBy: [{ priority: 'desc' }, { isFeatured: 'desc' }, { startsAt: 'desc' }],
     });
   }
 }

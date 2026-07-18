@@ -14,9 +14,9 @@ export class StorageService {
     private readonly prisma: PrismaService,
   ) {}
 
-  async presignTransferProof(input: PresignTransferProofDto) {
-    const order = await this.prisma.order.findUnique({
-      where: { publicToken: input.orderToken },
+  async presignTransferProof(input: PresignTransferProofDto, customerId: string) {
+    const order = await this.prisma.order.findFirst({
+      where: { publicToken: input.orderToken, customerId },
       select: { id: true, paymentMethod: true },
     });
     if (!order || order.paymentMethod !== PaymentMethod.BANK_TRANSFER) {

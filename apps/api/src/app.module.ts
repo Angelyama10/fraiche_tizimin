@@ -8,6 +8,8 @@ import { AuthModule } from './auth.module';
 import { CartsModule } from './carts.module';
 import { CatalogModule } from './catalog.module';
 import { ContactModule } from './contact.module';
+import { CustomerAuthModule } from './customer-auth.module';
+import { CustomersModule } from './customers.module';
 import { HealthController } from './health.controller';
 import { OrdersModule } from './orders.module';
 import { OutboxModule } from './outbox.module';
@@ -33,6 +35,8 @@ import { UploadsModule } from './uploads.module';
     PaymentsModule,
     UploadsModule,
     ContactModule,
+    CustomerAuthModule,
+    CustomersModule,
     SpecialRequestsModule,
     AuthModule,
     AdminModule,

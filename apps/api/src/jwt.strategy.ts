@@ -1,4 +1,4 @@
-import { Injectable, ServiceUnavailableException } from '@nestjs/common';
+import { Injectable, ServiceUnavailableException, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PassportStrategy } from '@nestjs/passport';
 import { UserRole } from '@prisma/client';
@@ -19,10 +19,20 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
       ignoreExpiration: false,
       secretOrKey: secret,
+      issuer: 'fraiche-api',
+      audience: 'fraiche-staff',
     });
   }
 
-  validate(payload: { sub: string; email: string; role: UserRole }): AuthenticatedUser {
+  validate(payload: {
+    sub: string;
+    email: string;
+    role: UserRole;
+    tokenType: 'STAFF';
+  }): AuthenticatedUser {
+    if (payload.tokenType !== 'STAFF') {
+      throw new UnauthorizedException('Token de personal invalido.');
+    }
     return { userId: payload.sub, email: payload.email, role: payload.role };
   }
 }

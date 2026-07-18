@@ -92,6 +92,7 @@ export class AdminService {
               locationId: location.id,
               onHand: variantInput.initialStock,
               available: variantInput.initialStock,
+              lowStockThreshold: variantInput.lowStockThreshold ?? 3,
             },
           });
           if (variantInput.initialStock > 0) {

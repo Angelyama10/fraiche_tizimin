@@ -5,6 +5,7 @@ import {
   PrismaClient,
   ProductLine,
   ProductStatus,
+  PromotionPlacement,
   PromotionType,
 } from '@prisma/client';
 import { Pool } from 'pg';
@@ -334,7 +335,10 @@ async function main() {
 
   const promotion = await prisma.promotion.upsert({
     where: { slug: 'bienvenida-fraiche' },
-    update: {},
+    update: {
+      requiresCode: true,
+      placement: PromotionPlacement.WELCOME,
+    },
     create: {
       slug: 'bienvenida-fraiche',
       code: 'FRAICHE10',
@@ -346,6 +350,8 @@ async function main() {
       endsAt,
       isActive: true,
       isFeatured: true,
+      requiresCode: true,
+      placement: PromotionPlacement.WELCOME,
     },
   });
 

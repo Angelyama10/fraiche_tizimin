@@ -47,6 +47,10 @@ services:
       WEB_APP_URL: ${WEB_APP_URL:-http://localhost:3000}
       WHATSAPP_PHONE: ${WHATSAPP_PHONE:-529861000000}
       JWT_SECRET: ${JWT_SECRET:-dev-only-change-before-production}
+      CUSTOMER_JWT_SECRET: ${CUSTOMER_JWT_SECRET:-dev-customer-only-change-before-production}
+      CUSTOMER_REFRESH_COOKIE_NAME: ${CUSTOMER_REFRESH_COOKIE_NAME:-fraiche_refresh}
+      REQUIRE_EMAIL_VERIFICATION: ${REQUIRE_EMAIL_VERIFICATION:-false}
+      STORE_TIME_ZONE: ${STORE_TIME_ZONE:-America/Merida}
       ADMIN_EMAIL: ${ADMIN_EMAIL:-}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
       SMTP_HOST: ${SMTP_HOST:-}

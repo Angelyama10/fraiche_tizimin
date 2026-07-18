@@ -16,13 +16,26 @@ Cada producto debe soportar imagenes, nombre, descripcion, categorias, familias 
 
 - Busqueda y filtros por categoria, linea y tipo de aroma.
 - Productos destacados, novedades y promociones.
-- Carrito persistente para invitados o clientes registrados.
+- Carrito persistente que puede comenzar como invitado y se asocia al iniciar sesion.
+- Cuenta obligatoria para checkout, pago, comprobantes e historial de compra.
+- Perfil, direcciones guardadas, favoritos y recuperacion segura de acceso.
 - Ordenes con reserva de inventario para evitar sobreventa.
 - Pago con efectivo, transferencia, tarjeta o link de pago.
 - Checkout Pro de Mercado Pago para tarjeta y link de pago.
 - Comprobantes de transferencia con revision administrativa.
 - Enlaces de WhatsApp con resumen contextual de carrito u orden.
 - Pedidos especiales para aromas sin existencia.
+- Historial privado con estado del pedido, paqueteria, codigo y enlace de rastreo.
+
+## Administracion de la tienda
+
+- Tablero con ventas diarias/mensuales, ordenes, productos y existencias.
+- Alta y edicion de productos, variantes, precios e inventario.
+- Ofertas generales, del dia, del mes, relampago y de bienvenida.
+- Promociones automaticas o mediante codigo, con vigencia y limites de uso.
+- Alertas de poco inventario reconocibles y resueltas al reabastecer.
+- Consulta de compras, direccion de entrega, comprobantes y seguimiento del envio.
+- Auditoria de cambios realizados por administradores y personal.
 
 ## Operacion
 

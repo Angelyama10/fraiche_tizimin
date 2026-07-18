@@ -76,6 +76,24 @@ export class ReservationsService {
           },
         });
         if (!activeReservations) {
+          const appliedPromotions = await transaction.orderPromotion.findMany({
+            where: { orderId: reservation.orderItem.orderId, releasedAt: null },
+          });
+          for (const applied of appliedPromotions) {
+            await transaction.promotion.updateMany({
+              where: { id: applied.promotionId, uses: { gt: 0 } },
+              data: { uses: { decrement: 1 } },
+            });
+            await transaction.orderPromotion.update({
+              where: {
+                orderId_promotionId: {
+                  orderId: reservation.orderItem.orderId,
+                  promotionId: applied.promotionId,
+                },
+              },
+              data: { releasedAt: new Date() },
+            });
+          }
           await transaction.order.updateMany({
             where: {
               id: reservation.orderItem.orderId,
