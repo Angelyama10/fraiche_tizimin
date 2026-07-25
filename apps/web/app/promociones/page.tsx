@@ -13,6 +13,6 @@ export const metadata: Metadata = {
 export const revalidate = 60;
 
 export default async function PromotionsPage() {
-  const promotions = await apiRequest<Promotion[]>('/promotions', { next: { revalidate: 60 } }).catch(() => []);
+  const promotions = await apiRequest<Promotion[]>('/promotions?includeUpcoming=true', { next: { revalidate: 60 } }).catch(() => []);
   return <PromotionsExperience promotions={promotions} />;
 }

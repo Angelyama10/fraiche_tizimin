@@ -1,10 +1,11 @@
 export function formatMoney(cents: number | null | undefined, currency = 'MXN') {
   if (cents === null || cents === undefined) return 'Consultar precio';
+  const hasFraction = Math.abs(cents) % 100 !== 0;
   return new Intl.NumberFormat('es-MX', {
     style: 'currency',
     currency,
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 0,
+    minimumFractionDigits: hasFraction ? 2 : 0,
+    maximumFractionDigits: hasFraction ? 2 : 0,
   }).format(cents / 100);
 }
 

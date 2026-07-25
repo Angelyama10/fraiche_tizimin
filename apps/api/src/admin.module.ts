@@ -8,6 +8,8 @@ import { RolesGuard } from './roles.guard';
 import { OrdersModule } from './orders.module';
 import { ShipmentsModule } from './shipments.module';
 import { InventoryAlertsModule } from './inventory-alerts.module';
+import { AdminNotificationsService } from './admin-notifications.service';
+import { ContentModule } from './content/content.module';
 
 @Module({
   imports: [
@@ -16,8 +18,9 @@ import { InventoryAlertsModule } from './inventory-alerts.module';
     OrdersModule,
     ShipmentsModule,
     InventoryAlertsModule,
+    ContentModule,
   ],
   controllers: [AdminController],
-  providers: [AdminService, AdminCommerceService, RolesGuard],
+  providers: [AdminService, AdminCommerceService, AdminNotificationsService, RolesGuard],
 })
 export class AdminModule {}

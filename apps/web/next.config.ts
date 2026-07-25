@@ -1,12 +1,12 @@
 import type { NextConfig } from 'next';
-import path from 'node:path';
 
 const nextConfig: NextConfig = {
+  output: 'standalone',
   images: {
     formats: ['image/avif', 'image/webp'],
   },
   turbopack: {
-    root: path.resolve('/app'),
+    root: process.cwd(),
   },
 };
 

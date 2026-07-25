@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import {
   BadGatewayException,
   BadRequestException,
@@ -22,7 +23,11 @@ import {
   InvalidWebhookSignatureError,
   WebhookSignatureValidator,
 } from 'mercadopago';
-import { ConfirmTransferProofDto } from './payment.dto';
+import Stripe = require('stripe');
+import {
+  ConfirmTransferProofDto,
+  ProcessMercadoPagoCardDto,
+} from './payment.dto';
 import { PrismaService } from './prisma.service';
 
 type MercadoPagoPreference = {
@@ -40,6 +45,10 @@ type MercadoPagoPayment = {
   currency_id: string;
 };
 
+type CardOrder = Prisma.OrderGetPayload<{
+  include: { items: true; payments: true };
+}>;
+
 type WebhookInput = {
   xSignature?: string;
   xRequestId?: string;
@@ -54,17 +63,37 @@ export class PaymentsService {
     private readonly config: ConfigService,
   ) {}
 
+  paymentConfiguration() {
+    const mercadoPagoPublicKey = this.config.get<string>('MERCADOPAGO_PUBLIC_KEY')?.trim();
+    const stripePublishableKey = this.config.get<string>('STRIPE_PUBLISHABLE_KEY')?.trim();
+    return {
+      mercadoPago: {
+        enabled: Boolean(
+          mercadoPagoPublicKey &&
+            this.config.get<string>('MERCADOPAGO_ACCESS_TOKEN') &&
+            this.config.get<string>('MERCADOPAGO_WEBHOOK_SECRET'),
+        ),
+        publicKey: mercadoPagoPublicKey || null,
+      },
+      stripe: {
+        enabled: Boolean(
+          stripePublishableKey &&
+            this.config.get<string>('STRIPE_SECRET_KEY') &&
+            this.config.get<string>('STRIPE_WEBHOOK_SECRET'),
+        ),
+        publishableKey: stripePublishableKey || null,
+      },
+    };
+  }
+
   async createMercadoPagoPreference(orderToken: string, customerId: string) {
     const order = await this.prisma.order.findFirst({
       where: { publicToken: orderToken, customerId },
       include: { items: true, payments: true },
     });
     if (!order) throw new NotFoundException('Orden no encontrada.');
-    if (
-      order.paymentMethod !== PaymentMethod.CARD &&
-      order.paymentMethod !== PaymentMethod.PAYMENT_LINK
-    ) {
-      throw new BadRequestException('La orden no usa Mercado Pago.');
+    if (order.paymentMethod !== PaymentMethod.PAYMENT_LINK) {
+      throw new BadRequestException('La orden no usa link de Mercado Pago.');
     }
     if (order.paymentStatus === PaymentStatus.APPROVED) {
       throw new ConflictException('La orden ya esta pagada.');
@@ -133,6 +162,196 @@ export class PaymentsService {
     });
 
     return { preferenceId: preference.id, checkoutUrl: preference.init_point };
+  }
+
+  async processMercadoPagoCard(
+    orderToken: string,
+    input: ProcessMercadoPagoCardDto,
+    customerId: string,
+  ) {
+    const order = await this.getOwnedCardOrder(
+      orderToken,
+      customerId,
+      PaymentProvider.MERCADO_PAGO,
+    );
+    const payment = this.cardPayment(order, PaymentProvider.MERCADO_PAGO);
+    const publicApiUrl = this.requireConfig('PUBLIC_API_URL').replace(/\/$/, '');
+    const idempotencyKey = createHash('sha256')
+      .update(`${payment.id}:${input.token}`)
+      .digest('hex');
+    const response = await fetch('https://api.mercadopago.com/v1/payments', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${this.requireConfig('MERCADOPAGO_ACCESS_TOKEN')}`,
+        'Content-Type': 'application/json',
+        'X-Idempotency-Key': idempotencyKey,
+      },
+      body: JSON.stringify({
+        transaction_amount: order.totalCents / 100,
+        token: input.token,
+        description: `Pedido ${order.number}`,
+        installments: input.installments,
+        payment_method_id: input.payment_method_id,
+        issuer_id: input.issuer_id || undefined,
+        payer: {
+          email: order.customerEmail,
+          identification: input.payer.identification,
+        },
+        external_reference: order.publicToken,
+        notification_url: `${publicApiUrl}/api/v1/payments/mercado-pago/webhook`,
+        statement_descriptor: 'KIIBOK',
+      }),
+    });
+
+    if (!response.ok) {
+      const detail = await response.text();
+      throw new BadGatewayException(
+        `Mercado Pago rechazo el pago: ${this.providerError(detail)}`,
+      );
+    }
+
+    const paymentData = (await response.json()) as MercadoPagoPayment;
+    const effectiveStatus = await this.applyMercadoPagoPayment(paymentData);
+    return {
+      paymentId: String(paymentData.id),
+      status: effectiveStatus,
+      statusDetail: paymentData.status_detail ?? null,
+    };
+  }
+
+  async createStripePaymentIntent(orderToken: string, customerId: string) {
+    const order = await this.getOwnedCardOrder(
+      orderToken,
+      customerId,
+      PaymentProvider.STRIPE,
+    );
+    const payment = this.cardPayment(order, PaymentProvider.STRIPE);
+    const stripe = this.stripeClient();
+
+    if (payment.providerPaymentId) {
+      const existingIntent = await stripe.paymentIntents.retrieve(
+        payment.providerPaymentId,
+      );
+      if (!existingIntent.client_secret) {
+        throw new BadGatewayException('Stripe no devolvio el secreto de la sesion.');
+      }
+      return {
+        clientSecret: existingIntent.client_secret,
+        paymentIntentId: existingIntent.id,
+      };
+    }
+
+    const intent = await stripe.paymentIntents.create(
+      {
+        amount: order.totalCents,
+        currency: order.currency.toLowerCase(),
+        automatic_payment_methods: { enabled: true },
+        description: `Pedido ${order.number}`,
+        receipt_email: order.customerEmail,
+        metadata: {
+          orderId: order.id,
+          orderToken: order.publicToken,
+          paymentId: payment.id,
+        },
+      },
+      { idempotencyKey: payment.id },
+    );
+    if (!intent.client_secret) {
+      throw new BadGatewayException('Stripe no devolvio el secreto de la sesion.');
+    }
+
+    await this.prisma.payment.update({
+      where: { id: payment.id },
+      data: {
+        providerPaymentId: intent.id,
+        providerResponse: intent as unknown as Prisma.InputJsonValue,
+      },
+    });
+    return { clientSecret: intent.client_secret, paymentIntentId: intent.id };
+  }
+
+  async syncStripePayment(orderToken: string, customerId: string) {
+    const order = await this.getOwnedCardOrder(
+      orderToken,
+      customerId,
+      PaymentProvider.STRIPE,
+      true,
+    );
+    const payment = this.cardPayment(order, PaymentProvider.STRIPE);
+    if (!payment.providerPaymentId) {
+      throw new ConflictException('El pago de Stripe aun no ha sido iniciado.');
+    }
+    const intent = await this.stripeClient().paymentIntents.retrieve(
+      payment.providerPaymentId,
+    );
+    const effectiveStatus = await this.applyStripePaymentIntent(intent);
+    return {
+      status: effectiveStatus,
+      statusDetail: intent.last_payment_error?.code ?? null,
+    };
+  }
+
+  async receiveStripeWebhook(rawBody: Buffer | undefined, signature?: string) {
+    if (!rawBody || !signature) {
+      throw new UnauthorizedException('Webhook de Stripe incompleto.');
+    }
+    let event: Stripe.Event;
+    try {
+      event = this.stripeClient().webhooks.constructEvent(
+        rawBody,
+        signature,
+        this.requireConfig('STRIPE_WEBHOOK_SECRET'),
+      );
+    } catch {
+      throw new UnauthorizedException('Firma de webhook de Stripe invalida.');
+    }
+
+    try {
+      await this.prisma.webhookEvent.create({
+        data: {
+          provider: PaymentProvider.STRIPE,
+          externalId: event.id,
+          eventType: event.type,
+          payload: event as unknown as Prisma.InputJsonValue,
+        },
+      });
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+        return { received: true, duplicate: true };
+      }
+      throw error;
+    }
+
+    try {
+      if (event.type.startsWith('payment_intent.')) {
+        await this.applyStripePaymentIntent(event.data.object as Stripe.PaymentIntent);
+      }
+      await this.prisma.webhookEvent.update({
+        where: {
+          provider_externalId_eventType: {
+            provider: PaymentProvider.STRIPE,
+            externalId: event.id,
+            eventType: event.type,
+          },
+        },
+        data: { processedAt: new Date() },
+      });
+      return { received: true };
+    } catch (error) {
+      await this.prisma.webhookEvent.update({
+        where: {
+          provider_externalId_eventType: {
+            provider: PaymentProvider.STRIPE,
+            externalId: event.id,
+            eventType: event.type,
+          },
+        },
+        data: {
+          error: error instanceof Error ? error.message.slice(0, 1000) : 'Unknown error',
+        },
+      });
+      throw error;
+    }
   }
 
   async receiveMercadoPagoWebhook(input: WebhookInput) {
@@ -226,6 +445,7 @@ export class PaymentsService {
     if (!input.objectKey.startsWith(`transfer-proofs/${order.id}/`)) {
       throw new BadRequestException('El comprobante no pertenece a esta orden.');
     }
+    const privateStorageUrl = this.requireConfig('STORAGE_PRIVATE_URL').replace(/\/$/, '');
     const payment = order.payments.find((entry) => entry.method === PaymentMethod.BANK_TRANSFER);
     if (!payment) throw new NotFoundException('Pago de transferencia no encontrado.');
 
@@ -234,7 +454,7 @@ export class PaymentsService {
         data: {
           paymentId: payment.id,
           objectKey: input.objectKey,
-          fileUrl: input.fileUrl,
+          fileUrl: `${privateStorageUrl}/${input.objectKey}`,
           fileName: input.fileName,
           mimeType: input.mimeType,
           sizeBytes: input.sizeBytes,
@@ -337,35 +557,233 @@ export class PaymentsService {
     }
 
     const mappedStatus = this.mapMercadoPagoStatus(paymentData.status);
-    await this.prisma.$transaction(
-      async (transaction) => {
-        const payment = order.payments.find(
-          (entry) => entry.provider === PaymentProvider.MERCADO_PAGO,
-        );
-        if (!payment) throw new NotFoundException('Registro de pago no encontrado.');
+    if (
+      mappedStatus === PaymentStatus.APPROVED &&
+      (await this.orderReservationIsInactive(order.id))
+    ) {
+      await this.refundLateMercadoPagoPayment(order.id, String(paymentData.id));
+      return PaymentStatus.REFUNDED;
+    }
 
-        await transaction.payment.update({
-          where: { id: payment.id },
-          data: {
-            status: mappedStatus,
-            providerPaymentId: String(paymentData.id),
-            statusDetail: paymentData.status_detail,
-            providerResponse: paymentData as Prisma.InputJsonValue,
-            approvedAt: mappedStatus === PaymentStatus.APPROVED ? new Date() : undefined,
-          },
-        });
+    try {
+      await this.prisma.$transaction(
+        async (transaction) => {
+          const payment = order.payments.find(
+            (entry) => entry.provider === PaymentProvider.MERCADO_PAGO,
+          );
+          if (!payment) throw new NotFoundException('Registro de pago no encontrado.');
 
-        if (mappedStatus === PaymentStatus.APPROVED && order.paymentStatus !== PaymentStatus.APPROVED) {
-          await this.confirmOrderPayment(transaction, order.id, payment.id);
-        } else if (order.paymentStatus !== PaymentStatus.APPROVED) {
-          await transaction.order.update({
-            where: { id: order.id },
-            data: { paymentStatus: mappedStatus },
+          await transaction.payment.update({
+            where: { id: payment.id },
+            data: {
+              status: mappedStatus,
+              providerPaymentId: String(paymentData.id),
+              statusDetail: paymentData.status_detail,
+              providerResponse: paymentData as Prisma.InputJsonValue,
+              approvedAt: mappedStatus === PaymentStatus.APPROVED ? new Date() : undefined,
+            },
           });
-        }
+
+          if (
+            mappedStatus === PaymentStatus.APPROVED &&
+            order.paymentStatus !== PaymentStatus.APPROVED
+          ) {
+            await this.confirmOrderPayment(transaction, order.id, payment.id);
+          } else if (order.paymentStatus !== PaymentStatus.APPROVED) {
+            await transaction.order.update({
+              where: { id: order.id },
+              data: { paymentStatus: mappedStatus },
+            });
+          }
+        },
+        { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+      );
+    } catch (error) {
+      if (
+        mappedStatus === PaymentStatus.APPROVED &&
+        (await this.orderReservationIsInactive(order.id))
+      ) {
+        await this.refundLateMercadoPagoPayment(order.id, String(paymentData.id));
+        return PaymentStatus.REFUNDED;
+      }
+      throw error;
+    }
+    return mappedStatus;
+  }
+
+  private async applyStripePaymentIntent(intent: Stripe.PaymentIntent) {
+    const orderToken = intent.metadata.orderToken;
+    const order = await this.prisma.order.findFirst({
+      where: orderToken
+        ? { publicToken: orderToken }
+        : { payments: { some: { providerPaymentId: intent.id } } },
+      include: { payments: true },
+    });
+    if (!order) throw new NotFoundException('La orden del pago de Stripe no existe.');
+    if (
+      intent.amount !== order.totalCents ||
+      intent.currency.toUpperCase() !== order.currency
+    ) {
+      throw new ConflictException('El monto o la moneda de Stripe no coincide con la orden.');
+    }
+    if (intent.status === 'succeeded' && intent.amount_received !== order.totalCents) {
+      throw new ConflictException('Stripe no confirmo el monto total de la orden.');
+    }
+
+    const mappedStatus = this.mapStripeStatus(intent.status);
+    if (
+      mappedStatus === PaymentStatus.APPROVED &&
+      (await this.orderReservationIsInactive(order.id))
+    ) {
+      await this.refundLateStripePayment(order.id, intent.id);
+      return PaymentStatus.REFUNDED;
+    }
+
+    try {
+      await this.prisma.$transaction(
+        async (transaction) => {
+          const payment = order.payments.find(
+            (entry) => entry.provider === PaymentProvider.STRIPE,
+          );
+          if (!payment) throw new NotFoundException('Registro de Stripe no encontrado.');
+
+          await transaction.payment.update({
+            where: { id: payment.id },
+            data: {
+              status: mappedStatus,
+              providerPaymentId: intent.id,
+              statusDetail: intent.last_payment_error?.code ?? intent.status,
+              providerResponse: intent as unknown as Prisma.InputJsonValue,
+              approvedAt: mappedStatus === PaymentStatus.APPROVED ? new Date() : undefined,
+            },
+          });
+          if (
+            mappedStatus === PaymentStatus.APPROVED &&
+            order.paymentStatus !== PaymentStatus.APPROVED
+          ) {
+            await this.confirmOrderPayment(transaction, order.id, payment.id);
+          } else if (order.paymentStatus !== PaymentStatus.APPROVED) {
+            await transaction.order.update({
+              where: { id: order.id },
+              data: { paymentStatus: mappedStatus },
+            });
+          }
+        },
+        { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+      );
+    } catch (error) {
+      if (
+        mappedStatus === PaymentStatus.APPROVED &&
+        (await this.orderReservationIsInactive(order.id))
+      ) {
+        await this.refundLateStripePayment(order.id, intent.id);
+        return PaymentStatus.REFUNDED;
+      }
+      throw error;
+    }
+    return mappedStatus;
+  }
+
+  private async orderReservationIsInactive(orderId: string) {
+    const order = await this.prisma.order.findUnique({
+      where: { id: orderId },
+      select: { status: true, expiresAt: true },
+    });
+    if (!order) return true;
+    if (order.status === OrderStatus.CANCELLED || order.status === OrderStatus.EXPIRED) {
+      return true;
+    }
+    if (order.expiresAt && order.expiresAt <= new Date()) return true;
+    const activeReservations = await this.prisma.inventoryReservation.count({
+      where: { orderItem: { orderId }, status: ReservationStatus.ACTIVE },
+    });
+    return activeReservations === 0;
+  }
+
+  private async refundLateMercadoPagoPayment(orderId: string, providerPaymentId: string) {
+    const payment = await this.prisma.payment.findFirst({
+      where: { orderId, provider: PaymentProvider.MERCADO_PAGO },
+    });
+    if (!payment) throw new NotFoundException('Registro de pago no encontrado.');
+    if (payment.status === PaymentStatus.REFUNDED) return;
+
+    const idempotencyKey = createHash('sha256')
+      .update(`late-payment-refund:${payment.id}:${providerPaymentId}`)
+      .digest('hex');
+    const response = await fetch(
+      `https://api.mercadopago.com/v1/payments/${providerPaymentId}/refunds`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${this.requireConfig('MERCADOPAGO_ACCESS_TOKEN')}`,
+          'Content-Type': 'application/json',
+          'X-Idempotency-Key': idempotencyKey,
+        },
+        body: '{}',
       },
-      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
     );
+    if (!response.ok) {
+      const detail = await response.text();
+      throw new BadGatewayException(
+        `No fue posible reembolsar el pago expirado: ${this.providerError(detail)}`,
+      );
+    }
+    const refund = (await response.json()) as Prisma.InputJsonValue;
+    await this.markLatePaymentRefunded(
+      orderId,
+      payment.id,
+      providerPaymentId,
+      refund,
+    );
+  }
+
+  private async refundLateStripePayment(orderId: string, providerPaymentId: string) {
+    const payment = await this.prisma.payment.findFirst({
+      where: { orderId, provider: PaymentProvider.STRIPE },
+    });
+    if (!payment) throw new NotFoundException('Registro de Stripe no encontrado.');
+    if (payment.status === PaymentStatus.REFUNDED) return;
+
+    const refund = await this.stripeClient().refunds.create(
+      {
+        payment_intent: providerPaymentId,
+        metadata: {
+          orderId,
+          reason: 'order_reservation_expired',
+        },
+      },
+      { idempotencyKey: `late-payment-refund-${payment.id}` },
+    );
+    await this.markLatePaymentRefunded(
+      orderId,
+      payment.id,
+      providerPaymentId,
+      refund as unknown as Prisma.InputJsonValue,
+    );
+  }
+
+  private async markLatePaymentRefunded(
+    orderId: string,
+    paymentId: string,
+    providerPaymentId: string,
+    providerResponse: Prisma.InputJsonValue,
+  ) {
+    await this.prisma.$transaction([
+      this.prisma.payment.update({
+        where: { id: paymentId },
+        data: {
+          status: PaymentStatus.REFUNDED,
+          providerPaymentId,
+          statusDetail: 'automatic_refund_after_reservation_expired',
+          providerResponse,
+          approvedAt: null,
+        },
+      }),
+      this.prisma.order.update({
+        where: { id: orderId },
+        data: { paymentStatus: PaymentStatus.REFUNDED },
+      }),
+    ]);
   }
 
   private mapMercadoPagoStatus(status: string) {
@@ -377,6 +795,19 @@ export class PaymentsService {
       cancelled: PaymentStatus.CANCELLED,
       refunded: PaymentStatus.REFUNDED,
       charged_back: PaymentStatus.CHARGED_BACK,
+    };
+    return statuses[status] ?? PaymentStatus.PENDING;
+  }
+
+  private mapStripeStatus(status: Stripe.PaymentIntent.Status) {
+    const statuses: Record<Stripe.PaymentIntent.Status, PaymentStatus> = {
+      canceled: PaymentStatus.CANCELLED,
+      processing: PaymentStatus.IN_PROCESS,
+      requires_action: PaymentStatus.PENDING,
+      requires_capture: PaymentStatus.IN_PROCESS,
+      requires_confirmation: PaymentStatus.PENDING,
+      requires_payment_method: PaymentStatus.REJECTED,
+      succeeded: PaymentStatus.APPROVED,
     };
     return statuses[status] ?? PaymentStatus.PENDING;
   }
@@ -457,6 +888,63 @@ export class PaymentsService {
     const data = body.data;
     if (!data || typeof data !== 'object' || !('id' in data)) return undefined;
     return String((data as { id: unknown }).id);
+  }
+
+  private async getOwnedCardOrder(
+    orderToken: string,
+    customerId: string,
+    provider: PaymentProvider,
+    allowFinalized = false,
+  ) {
+    const order = await this.prisma.order.findFirst({
+      where: { publicToken: orderToken, customerId },
+      include: { items: true, payments: true },
+    });
+    if (!order) throw new NotFoundException('Orden no encontrada.');
+    if (order.paymentMethod !== PaymentMethod.CARD) {
+      throw new BadRequestException('La orden no utiliza pago con tarjeta.');
+    }
+    if (!allowFinalized && order.paymentStatus === PaymentStatus.APPROVED) {
+      throw new ConflictException('La orden ya esta pagada.');
+    }
+    if (
+      !allowFinalized &&
+      (order.status === OrderStatus.CANCELLED || order.status === OrderStatus.EXPIRED)
+    ) {
+      throw new ConflictException('La reserva de la orden ya no esta activa.');
+    }
+    this.cardPayment(order, provider);
+    return order;
+  }
+
+  private cardPayment(order: CardOrder, provider: PaymentProvider) {
+    const payment = order.payments.find(
+      (entry) => entry.provider === provider && entry.method === PaymentMethod.CARD,
+    );
+    if (!payment) {
+      throw new BadRequestException('La orden pertenece a otra pasarela de pago.');
+    }
+    return payment;
+  }
+
+  private stripeClient() {
+    return new Stripe(this.requireConfig('STRIPE_SECRET_KEY'));
+  }
+
+  private providerError(detail: string) {
+    try {
+      const parsed = JSON.parse(detail) as {
+        message?: string;
+        cause?: Array<{ description?: string }>;
+      };
+      return (
+        parsed.cause?.find((entry) => entry.description)?.description ??
+        parsed.message ??
+        'No fue posible procesar el pago.'
+      ).slice(0, 300);
+    } catch {
+      return 'No fue posible procesar el pago.';
+    }
   }
 
   private requireConfig(name: string) {

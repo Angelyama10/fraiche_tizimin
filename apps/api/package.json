@@ -25,8 +25,8 @@
     "@nestjs/schedule": "latest",
     "@nestjs/swagger": "latest",
     "@nestjs/throttler": "latest",
-    "@prisma/adapter-pg": "latest",
-    "@prisma/client": "latest",
+    "@prisma/adapter-pg": "7.9.0",
+    "@prisma/client": "7.9.0",
     "argon2": "^0.44.0",
     "bcrypt": "latest",
     "class-transformer": "latest",
@@ -39,7 +39,8 @@
     "passport-jwt": "latest",
     "pg": "latest",
     "reflect-metadata": "latest",
-    "rxjs": "latest"
+    "rxjs": "latest",
+    "stripe": "^22.3.2"
   },
   "devDependencies": {
     "@nestjs/cli": "latest",
@@ -51,7 +52,7 @@
     "@types/nodemailer": "latest",
     "@types/passport-jwt": "latest",
     "@types/pg": "latest",
-    "prisma": "latest",
+    "prisma": "7.9.0",
     "ts-node": "latest",
     "tsx": "latest",
     "typescript": "5.9.3"
@@ -60,6 +61,9 @@
     "seed": "tsx prisma/seed.ts"
   },
   "overrides": {
-    "@hono/node-server": "1.19.13"
+    "@hono/node-server": "2.0.11",
+    "fast-uri": "3.1.4",
+    "find-my-way": "9.7.0",
+    "valibot": "1.4.2"
   }
 }

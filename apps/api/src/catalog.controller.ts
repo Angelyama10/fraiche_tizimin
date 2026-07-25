@@ -1,4 +1,4 @@
-import { Controller, Get } from '@nestjs/common';
+import { Controller, DefaultValuePipe, Get, ParseBoolPipe, Query } from '@nestjs/common';
 import { CatalogService } from './catalog.service';
 
 @Controller()
@@ -16,7 +16,10 @@ export class CatalogController {
   }
 
   @Get('promotions')
-  promotions() {
-    return this.catalog.promotions();
+  promotions(
+    @Query('includeUpcoming', new DefaultValuePipe(false), ParseBoolPipe)
+    includeUpcoming: boolean,
+  ) {
+    return this.catalog.promotions(includeUpcoming);
   }
 }

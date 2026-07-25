@@ -7,7 +7,6 @@ import {
   Check,
   CheckCircle2,
   CreditCard,
-  ExternalLink,
   Landmark,
   Link2,
   LockKeyhole,
@@ -19,6 +18,7 @@ import {
 } from 'lucide-react';
 import Image from 'next/image';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { apiRequest, errorMessage } from '@/lib/api';
 import { lineFallbackImage } from '@/lib/catalog';
@@ -29,17 +29,23 @@ import { useCart } from '@/providers/cart-provider';
 import { useNotify } from '@/providers/notification-provider';
 
 type PaymentMethod = 'CARD' | 'PAYMENT_LINK' | 'BANK_TRANSFER' | 'CASH';
+type PaymentProvider = 'MERCADO_PAGO' | 'STRIPE';
 type DeliveryMethod = 'SHIPPING' | 'LOCAL_DELIVERY' | 'STORE_PICKUP';
 type Instruction = { title: string; instructions: string; accountData?: Record<string, unknown> | null };
+type GatewayConfiguration = {
+  mercadoPago: { enabled: boolean; publicKey: string | null };
+  stripe: { enabled: boolean; publishableKey: string | null };
+};
 
 const payments: Array<{ id: PaymentMethod; title: string; note: string; icon: typeof CreditCard }> = [
-  { id: 'CARD', title: 'Tarjeta', note: 'Mercado Pago', icon: CreditCard },
-  { id: 'PAYMENT_LINK', title: 'Link de pago', note: 'Recíbelo al continuar', icon: Link2 },
+  { id: 'CARD', title: 'Tarjeta en línea', note: 'Sin salir de KI’IBOK', icon: CreditCard },
+  { id: 'PAYMENT_LINK', title: 'Link de pago', note: 'Abrir Mercado Pago', icon: Link2 },
   { id: 'BANK_TRANSFER', title: 'Transferencia', note: 'Sube tu comprobante', icon: Landmark },
   { id: 'CASH', title: 'Efectivo', note: 'Al recoger', icon: Banknote },
 ];
 
 export function CheckoutExperience() {
+  const router = useRouter();
   const auth = useAuth();
   const { cart, loading: cartLoading, mutating, updateItem, removeItem, resetCart } = useCart();
   const notify = useNotify();
@@ -48,6 +54,9 @@ export function CheckoutExperience() {
   const [newAddress, setNewAddress] = useState(false);
   const [deliveryMethod, setDeliveryMethod] = useState<DeliveryMethod>('SHIPPING');
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('CARD');
+  const [paymentProvider, setPaymentProvider] = useState<PaymentProvider>('MERCADO_PAGO');
+  const [gatewayConfiguration, setGatewayConfiguration] =
+    useState<GatewayConfiguration | null>(null);
   const [promotionCode, setPromotionCode] = useState('');
   const [customerNotes, setCustomerNotes] = useState('');
   const [instruction, setInstruction] = useState<Instruction | null>(null);
@@ -74,10 +83,31 @@ export function CheckoutExperience() {
   }, [paymentMethod]);
 
   useEffect(() => {
+    void apiRequest<GatewayConfiguration>('/payments/configuration', {
+      cache: 'no-store',
+    })
+      .then((configuration) => {
+        setGatewayConfiguration(configuration);
+        if (!configuration.mercadoPago.enabled && configuration.stripe.enabled) {
+          setPaymentProvider('STRIPE');
+        }
+      })
+      .catch(() => setGatewayConfiguration(null));
+  }, []);
+
+  useEffect(() => {
     if (paymentMethod === 'CASH') setDeliveryMethod('STORE_PICKUP');
   }, [paymentMethod]);
 
-  const canCheckout = useMemo(() => Boolean(cart?.items.length && auth.status === 'authenticated'), [cart?.items.length, auth.status]);
+  const gatewayAvailable =
+    paymentMethod !== 'CARD' ||
+    (paymentProvider === 'MERCADO_PAGO'
+      ? gatewayConfiguration?.mercadoPago.enabled
+      : gatewayConfiguration?.stripe.enabled);
+  const canCheckout = useMemo(
+    () => Boolean(cart?.items.length && auth.status === 'authenticated' && gatewayAvailable),
+    [auth.status, cart?.items.length, gatewayAvailable],
+  );
 
   async function placeOrder(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -112,6 +142,7 @@ export function CheckoutExperience() {
         body: JSON.stringify({
           cartToken: cart.publicToken,
           paymentMethod,
+          paymentProvider: paymentMethod === 'CARD' ? paymentProvider : undefined,
           deliveryMethod,
           shippingAddressId: !newAddress && deliveryMethod !== 'STORE_PICKUP' ? addressId : undefined,
           shippingAddress,
@@ -119,17 +150,22 @@ export function CheckoutExperience() {
           customerNotes: customerNotes.trim() || undefined,
         }),
       });
-      setCompletedOrder(order);
       resetCart();
 
-      if (paymentMethod === 'CARD' || paymentMethod === 'PAYMENT_LINK') {
+      if (paymentMethod === 'CARD') {
+        router.push(`/pago/${order.publicToken}`);
+        return;
+      }
+      if (paymentMethod === 'PAYMENT_LINK') {
         try {
           const preference = await auth.request<{ checkoutUrl: string }>(`/payments/mercado-pago/orders/${order.publicToken}/preference`, { method: 'POST' });
           window.location.assign(preference.checkoutUrl);
+          return;
         } catch (error) {
           setPaymentError(errorMessage(error));
         }
       }
+      setCompletedOrder(order);
     } catch (error) {
       notify({ title: 'No pudimos crear el pedido', description: errorMessage(error), tone: 'error' });
     } finally {
@@ -180,6 +216,35 @@ export function CheckoutExperience() {
               <section className="checkoutSection">
                 <div className="checkoutSection__heading"><span>02</span><div><h2>Elige cómo pagar</h2><p>Los datos de tarjeta nunca pasan por nuestros servidores.</p></div></div>
                 <div className="choiceGrid choiceGrid--payments">{payments.map((payment) => <Choice active={paymentMethod === payment.id} icon={payment.icon} key={payment.id} label={payment.title} note={payment.note} onClick={() => setPaymentMethod(payment.id)} />)}</div>
+                {paymentMethod === 'CARD' && (
+                  <div className="gatewayPicker" aria-label="Pasarela para tarjeta">
+                    <button
+                      className={paymentProvider === 'MERCADO_PAGO' ? 'isActive' : ''}
+                      disabled={gatewayConfiguration ? !gatewayConfiguration.mercadoPago.enabled : true}
+                      onClick={() => setPaymentProvider('MERCADO_PAGO')}
+                      type="button"
+                    >
+                      <span className="gatewayPicker__mark gatewayPicker__mark--mp">MP</span>
+                      <span><strong>Mercado Pago</strong><small>Crédito, débito y meses disponibles</small></span>
+                      {paymentProvider === 'MERCADO_PAGO' && <Check size={15} />}
+                    </button>
+                    <button
+                      className={paymentProvider === 'STRIPE' ? 'isActive' : ''}
+                      disabled={gatewayConfiguration ? !gatewayConfiguration.stripe.enabled : true}
+                      onClick={() => setPaymentProvider('STRIPE')}
+                      type="button"
+                    >
+                      <span className="gatewayPicker__mark gatewayPicker__mark--stripe">S</span>
+                      <span><strong>Stripe</strong><small>Tarjetas y autenticación bancaria</small></span>
+                      {paymentProvider === 'STRIPE' && <Check size={15} />}
+                    </button>
+                    {gatewayConfiguration &&
+                      !gatewayConfiguration.mercadoPago.enabled &&
+                      !gatewayConfiguration.stripe.enabled && (
+                        <p>La tienda está terminando de configurar el pago con tarjeta.</p>
+                      )}
+                  </div>
+                )}
                 {instruction && <div className="paymentInstruction"><Landmark aria-hidden="true" size={18} /><div><strong>{instruction.title}</strong><p>{instruction.instructions}</p></div></div>}
               </section>
 

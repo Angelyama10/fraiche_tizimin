@@ -10,19 +10,14 @@ import {
   X,
 } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
+import Image from 'next/image';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useAuth } from '@/providers/auth-provider';
 import { useCart } from '@/providers/cart-provider';
-
-const navItems = [
-  { href: '/productos', label: 'Perfumes' },
-  { href: '/productos?line=PERSONAL_CARE', label: 'Cuidado personal' },
-  { href: '/promociones', label: 'Promociones' },
-  { href: '/pedidos-especiales', label: 'Pedidos especiales' },
-  { href: '/#nosotros', label: 'Nosotros' },
-];
+import type { SiteContentDocument } from '@/lib/site-content';
+import { BrandIdentity } from './brand-identity';
 
 const perfumeLinks = [
   { href: '/productos?line=DESIGNER_CLASSIC', label: 'Diseñador clásico', note: '60 ml · concentración clásica' },
@@ -31,20 +26,38 @@ const perfumeLinks = [
   { href: '/productos?line=PREMIUM', label: 'Premium', note: 'Nicho y árabes · $380 MXN' },
 ];
 
-export function SiteHeader({ onOpenSearch }: { onOpenSearch: () => void }) {
+export function SiteHeader({
+  content,
+  onOpenSearch,
+}: {
+  content: SiteContentDocument['global'];
+  onOpenSearch: () => void;
+}) {
   const [menuOpen, setMenuOpen] = useState(false);
+  const [scrolled, setScrolled] = useState(false);
   const pathname = usePathname();
   const { customer } = useAuth();
   const { cart, setDrawerOpen } = useCart();
+  const navItems = content.header.navigation;
+  const perfumeItem = navItems.find((item) => item.kind === 'PERFUME_MENU') ?? navItems[0];
+
+  useEffect(() => {
+    const update = () => setScrolled(window.scrollY > 18);
+    update();
+    window.addEventListener('scroll', update, { passive: true });
+    return () => window.removeEventListener('scroll', update);
+  }, []);
 
   return (
     <>
-      <div className="announcementBar">
-        <p>Envíos a todo México</p>
-        <span aria-hidden="true" />
-        <p>Atención cercana desde Tizimín</p>
-      </div>
-      <header className="siteHeader">
+      {content.announcement.enabled && (
+        <div className="announcementBar">
+          <p>Envíos a todo México</p>
+          <span aria-hidden="true" />
+          <p>{content.announcement.text}</p>
+        </div>
+      )}
+      <header className={`siteHeader ${scrolled ? 'isScrolled' : ''}`}>
         <div className="siteHeader__inner">
           <button
             aria-label="Abrir menú"
@@ -56,22 +69,18 @@ export function SiteHeader({ onOpenSearch }: { onOpenSearch: () => void }) {
             <Menu aria-hidden="true" size={22} />
           </button>
 
-          <Link className="brandMark" href="/" aria-label="Fraîche Tizimín, inicio">
-            <span className="brandMark__monogram">F</span>
-            <span>
-              <strong>Fraîche</strong>
-              <small>Tizimín</small>
-            </span>
+          <Link className="brandIdentityLink" href="/" aria-label="KI'IBOK Exclusivo, inicio">
+            <BrandIdentity compact logoAlt={content.header.logoAlt} logoUrl={content.header.logoUrl} />
           </Link>
 
           <nav className="desktopNav" aria-label="Navegación principal">
             <div className="desktopNav__dropdown">
-              <Link className={pathname === '/productos' ? 'isActive' : ''} href="/productos">
-                Perfumes <ChevronDown aria-hidden="true" size={14} />
+              <Link className={pathname === '/productos' ? 'isActive' : ''} href={perfumeItem.href}>
+                {perfumeItem.label} <ChevronDown aria-hidden="true" size={14} />
               </Link>
               <div className="desktopNav__menu">
                 <div>
-                  <span className="menuEyebrow">Explora por línea</span>
+                  <span className="menuEyebrow">{content.header.menuEyebrow}</span>
                   {perfumeLinks.map((item) => (
                     <Link href={item.href} key={item.href}>
                       <strong>{item.label}</strong>
@@ -79,14 +88,23 @@ export function SiteHeader({ onOpenSearch }: { onOpenSearch: () => void }) {
                     </Link>
                   ))}
                 </div>
-                <Link className="desktopNav__feature" href="/productos?featured=true">
-                  <span>Nuestra selección</span>
-                  <strong>Los aromas que todos quieren</strong>
-                  <small>Ver destacados</small>
+                <Link className="desktopNav__feature" href={content.header.featureLink.href}>
+                  <Image
+                    alt=""
+                    aria-hidden="true"
+                    fill
+                    sizes="300px"
+                    src={content.header.featureImageUrl}
+                    unoptimized={content.header.featureImageUrl.startsWith('http')}
+                  />
+                  <span>{content.header.featureEyebrow}</span>
+                  <strong>{content.header.featureTitle}</strong>
+                  <p>{content.header.featureDescription}</p>
+                  <small>{content.header.featureLink.label}</small>
                 </Link>
               </div>
             </div>
-            {navItems.slice(1).map((item) => (
+            {navItems.filter((item) => item.id !== perfumeItem.id).map((item) => (
               <Link href={item.href} key={item.href}>
                 {item.label}
               </Link>
@@ -144,7 +162,7 @@ export function SiteHeader({ onOpenSearch }: { onOpenSearch: () => void }) {
               transition={{ type: 'spring', damping: 30, stiffness: 300 }}
             >
               <div className="mobileMenu__header">
-                <span className="brandMark__monogram">F</span>
+                <BrandIdentity compact logoAlt={content.header.logoAlt} logoUrl={content.header.logoUrl} />
                 <button aria-label="Cerrar menú" className="iconButton" onClick={() => setMenuOpen(false)} type="button">
                   <X aria-hidden="true" size={20} />
                 </button>

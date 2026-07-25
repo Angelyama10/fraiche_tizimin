@@ -20,6 +20,7 @@ import { ProductsModule } from './products.module';
 import { ReservationsModule } from './reservations.module';
 import { SpecialRequestsModule } from './special-requests.module';
 import { UploadsModule } from './uploads.module';
+import { ContentModule } from './content/content.module';
 
 @Module({
   imports: [
@@ -34,6 +35,7 @@ import { UploadsModule } from './uploads.module';
     OrdersModule,
     PaymentsModule,
     UploadsModule,
+    ContentModule,
     ContactModule,
     CustomerAuthModule,
     CustomersModule,

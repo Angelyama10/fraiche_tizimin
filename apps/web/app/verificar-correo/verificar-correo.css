@@ -1,0 +1,98 @@
+.verifyEmailPage {
+  min-height: clamp(620px, 82vh, 900px);
+  display: grid;
+  place-items: center;
+  padding: 120px 20px 72px;
+  background:
+    linear-gradient(135deg, rgba(209, 238, 229, 0.78), rgba(255, 245, 237, 0.88) 42%, rgba(255, 255, 255, 0.96)),
+    var(--color-cream);
+}
+
+.verifyEmailPanel {
+  width: min(100%, 720px);
+  border: 1px solid rgba(13, 79, 67, 0.12);
+  background: rgba(255, 255, 255, 0.78);
+  box-shadow: 0 30px 90px rgba(15, 43, 37, 0.14);
+  backdrop-filter: blur(24px);
+  padding: clamp(32px, 7vw, 72px);
+  text-align: center;
+}
+
+.verifyEmailIcon {
+  width: 86px;
+  height: 86px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  margin-bottom: 24px;
+}
+
+.verifyEmailIcon.isSuccess {
+  color: #0d4f43;
+  background: #d7f2e9;
+}
+
+.verifyEmailIcon.isError {
+  color: #d94d43;
+  background: #ffe2df;
+}
+
+.verifyEmailPanel h1 {
+  margin: 12px auto 14px;
+  max-width: 620px;
+  font-family: var(--font-display);
+  font-size: clamp(3rem, 9vw, 5.8rem);
+  line-height: 0.9;
+  color: var(--color-ink);
+}
+
+.verifyEmailPanel p {
+  max-width: 560px;
+  margin: 0 auto;
+  color: var(--color-muted);
+  font-size: 1.04rem;
+  line-height: 1.7;
+}
+
+.verifyEmailActions {
+  display: flex;
+  justify-content: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 30px;
+}
+
+.verifyEmailHint {
+  margin: 28px auto 0;
+  max-width: 520px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  color: var(--color-muted);
+  font-size: 0.92rem;
+}
+
+@media (max-width: 620px) {
+  .verifyEmailPage {
+    padding-top: 96px;
+  }
+
+  .verifyEmailPanel {
+    text-align: left;
+  }
+
+  .verifyEmailActions {
+    justify-content: stretch;
+  }
+
+  .verifyEmailActions a {
+    width: 100%;
+  }
+
+  .verifyEmailHint {
+    align-items: flex-start;
+    justify-content: flex-start;
+  }
+}

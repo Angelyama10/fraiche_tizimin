@@ -3,7 +3,8 @@ import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { Interval } from '@nestjs/schedule';
 import { OutboxStatus, Prisma } from '@prisma/client';
-import nodemailer, { Transporter } from 'nodemailer';
+import * as nodemailer from 'nodemailer';
+import type { Transporter } from 'nodemailer';
 import { PrismaService } from './prisma.service';
 
 type ClaimedEvent = {

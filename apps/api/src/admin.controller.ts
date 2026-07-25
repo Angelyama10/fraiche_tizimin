@@ -1,11 +1,13 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Param,
   ParseEnumPipe,
   Patch,
   Post,
+  Put,
   Query,
   Req,
   UseGuards,
@@ -16,6 +18,7 @@ import {
   CreatePromotionDto,
   CreateShipmentDto,
   ListAdminInventoryDto,
+  ListAdminNotificationsDto,
   ListAdminOrdersDto,
   ListAdminProductsDto,
   ListPromotionsDto,
@@ -41,6 +44,13 @@ import { PaymentsService } from './payments.service';
 import { RolesGuard } from './roles.guard';
 import { ShipmentsService } from './shipments.service';
 import { InventoryAlertsService } from './inventory-alerts.service';
+import { AdminNotificationsService } from './admin-notifications.service';
+import {
+  CompleteMediaAssetDto,
+  PresignMediaAssetDto,
+  UpdateSiteContentDto,
+} from './content/content.dto';
+import { SiteContentService } from './content/site-content.service';
 
 type AuthenticatedRequest = { user: AuthenticatedUser };
 
@@ -54,11 +64,92 @@ export class AdminController {
     private readonly payments: PaymentsService,
     private readonly shipments: ShipmentsService,
     private readonly inventoryAlerts: InventoryAlertsService,
+    private readonly notifications: AdminNotificationsService,
+    private readonly siteContent: SiteContentService,
   ) {}
+
+  @Roles(UserRole.ADMIN)
+  @Get('content')
+  getSiteContent() {
+    return this.siteContent.getAdminContent();
+  }
+
+  @Roles(UserRole.ADMIN)
+  @Put('content/draft')
+  saveSiteContentDraft(
+    @Body() input: UpdateSiteContentDto,
+    @Req() request: AuthenticatedRequest,
+  ) {
+    return this.siteContent.saveDraft(input.content, request.user.userId);
+  }
+
+  @Roles(UserRole.ADMIN)
+  @Post('content/publish')
+  publishSiteContent(@Req() request: AuthenticatedRequest) {
+    return this.siteContent.publish(request.user.userId);
+  }
+
+  @Roles(UserRole.ADMIN)
+  @Post('content/preview')
+  createSiteContentPreview(@Req() request: AuthenticatedRequest) {
+    return this.siteContent.createPreviewToken(request.user.userId);
+  }
+
+  @Roles(UserRole.ADMIN)
+  @Get('media')
+  listMedia(@Query() query: PaginationDto) {
+    return this.siteContent.listMedia(query.page, query.pageSize);
+  }
+
+  @Roles(UserRole.ADMIN)
+  @Post('media/presign')
+  presignMedia(
+    @Body() input: PresignMediaAssetDto,
+    @Req() request: AuthenticatedRequest,
+  ) {
+    return this.siteContent.presignMedia(input, request.user.userId);
+  }
+
+  @Roles(UserRole.ADMIN)
+  @Post('media/:id/complete')
+  completeMedia(
+    @Param('id') id: string,
+    @Body() input: CompleteMediaAssetDto,
+    @Req() request: AuthenticatedRequest,
+  ) {
+    return this.siteContent.completeMedia(id, input, request.user.userId);
+  }
+
+  @Roles(UserRole.ADMIN)
+  @Delete('media/:id')
+  archiveMedia(@Param('id') id: string, @Req() request: AuthenticatedRequest) {
+    return this.siteContent.archiveMedia(id, request.user.userId);
+  }
 
   @Get('dashboard')
   dashboard() {
     return this.commerce.dashboard();
+  }
+
+  @Get('notifications')
+  listNotifications(
+    @Query() query: ListAdminNotificationsDto,
+    @Req() request: AuthenticatedRequest,
+  ) {
+    return this.notifications.list(request.user.userId, query);
+  }
+
+  @Patch('notifications/read-all')
+  markAllNotificationsRead(@Req() request: AuthenticatedRequest) {
+    return this.notifications.markAllRead(request.user.userId);
+  }
+
+  @Patch('notifications/:notificationId/read')
+  markNotificationRead(
+    @Param('notificationId') notificationId: string,
+    @Req() request: AuthenticatedRequest,
+  ) {
+    return this.notifications.markRead(request.user.userId, notificationId);
   }
 
   @Get('products')

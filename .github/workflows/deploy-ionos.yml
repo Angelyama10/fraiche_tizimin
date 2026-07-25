@@ -1,0 +1,66 @@
+name: Desplegar en IONOS
+
+on:
+  workflow_dispatch:
+    inputs:
+      seed:
+        description: Cargar datos iniciales (solo primer despliegue)
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ionos-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Produccion
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Preparar acceso SSH
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.IONOS_SSH_PRIVATE_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.IONOS_KNOWN_HOSTS }}
+        run: |
+          install -m 0700 -d ~/.ssh
+          printf '%s\n' "$SSH_PRIVATE_KEY" > ~/.ssh/ionos
+          chmod 0600 ~/.ssh/ionos
+          printf '%s\n' "$SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
+
+      - name: Sincronizar codigo
+        env:
+          IONOS_HOST: ${{ secrets.IONOS_HOST }}
+          IONOS_USER: ${{ secrets.IONOS_USER }}
+          IONOS_DEPLOY_PATH: ${{ secrets.IONOS_DEPLOY_PATH }}
+        run: |
+          rsync -az --delete \
+            --exclude '.git/' \
+            --exclude '.env' \
+            --exclude '.env.*' \
+            --exclude 'deploy/production.env' \
+            --exclude 'deploy/backups/' \
+            --exclude 'node_modules/' \
+            --exclude '.next/' \
+            --exclude 'dist/' \
+            -e 'ssh -i ~/.ssh/ionos' \
+            ./ "${IONOS_USER}@${IONOS_HOST}:${IONOS_DEPLOY_PATH}/"
+
+      - name: Publicar aplicacion
+        env:
+          IONOS_HOST: ${{ secrets.IONOS_HOST }}
+          IONOS_USER: ${{ secrets.IONOS_USER }}
+          IONOS_DEPLOY_PATH: ${{ secrets.IONOS_DEPLOY_PATH }}
+          RUN_SEED: ${{ inputs.seed }}
+        run: |
+          seed_flag=''
+          if [[ "$RUN_SEED" == 'true' ]]; then seed_flag='--seed'; fi
+          ssh -i ~/.ssh/ionos "${IONOS_USER}@${IONOS_HOST}" \
+            "cd '${IONOS_DEPLOY_PATH}' && chmod +x deploy/*.sh && ./deploy/deploy.sh ${seed_flag}"
+

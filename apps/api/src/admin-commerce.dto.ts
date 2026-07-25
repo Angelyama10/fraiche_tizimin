@@ -10,6 +10,7 @@ import {
   IsOptional,
   IsString,
   IsUrl,
+  Matches,
   Max,
   MaxLength,
   Min,
@@ -41,6 +42,13 @@ export class PaginationDto {
   @Min(1)
   @Max(100)
   pageSize = 25;
+}
+
+export class ListAdminNotificationsDto extends PaginationDto {
+  @IsOptional()
+  @Transform(({ value }) => (value === 'true' ? true : value === 'false' ? false : value))
+  @IsBoolean()
+  unreadOnly?: boolean;
 }
 
 export class ListAdminOrdersDto extends PaginationDto {
@@ -194,6 +202,9 @@ export class CreatePromotionDto {
   @IsString()
   @IsNotEmpty()
   @MaxLength(120)
+  @Matches(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, {
+    message: 'slug debe usar solo letras minusculas, numeros y guiones.',
+  })
   slug!: string;
 
   @IsOptional()

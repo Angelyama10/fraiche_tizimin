@@ -7,5 +7,6 @@ import { UploadsController } from './uploads.controller';
   imports: [CustomerAuthModule],
   controllers: [UploadsController],
   providers: [StorageService],
+  exports: [StorageService],
 })
 export class UploadsModule {}

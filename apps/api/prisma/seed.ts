@@ -2,6 +2,7 @@ import { PrismaPg } from '@prisma/adapter-pg';
 import {
   PaymentMethod,
   PricingMode,
+  Prisma,
   PrismaClient,
   ProductLine,
   ProductStatus,
@@ -10,6 +11,7 @@ import {
 } from '@prisma/client';
 import { Pool } from 'pg';
 import { hash } from 'bcrypt';
+import { DEFAULT_SITE_CONTENT } from '../src/content/site-content.defaults';
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 const prisma = new PrismaClient({ adapter: new PrismaPg(pool) });
@@ -143,6 +145,17 @@ async function main() {
       },
     });
   }
+
+  await prisma.siteContent.upsert({
+    where: { key: 'main' },
+    update: {},
+    create: {
+      key: 'main',
+      draftContent: DEFAULT_SITE_CONTENT as unknown as Prisma.InputJsonValue,
+      publishedContent: DEFAULT_SITE_CONTENT as unknown as Prisma.InputJsonValue,
+      publishedAt: new Date(),
+    },
+  });
 
   const policies = [
     [ProductLine.DESIGNER_CLASSIC, PricingMode.CATALOG, null],

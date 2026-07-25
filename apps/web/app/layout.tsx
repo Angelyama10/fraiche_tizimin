@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from 'next';
 import { Cormorant_Garamond, Manrope } from 'next/font/google';
 import { AppProviders } from '@/providers/app-providers';
 import { SiteShell } from '@/components/site-shell';
+import { getPublishedSiteContent } from '@/lib/site-content';
 import './globals.css';
 
 const displayFont = Cormorant_Garamond({
@@ -21,8 +22,8 @@ const bodyFont = Manrope({
 export const metadata: Metadata = {
   metadataBase: new URL(process.env.NEXT_PUBLIC_WEB_URL ?? 'http://localhost:3000'),
   title: {
-    default: 'Fraîche Tizimín | Perfumes que dejan huella',
-    template: '%s | Fraîche Tizimín',
+    default: "KI'IBOK Exclusivo | Perfumes Fraîche en Tizimín",
+    template: "%s | KI'IBOK Exclusivo",
   },
   description:
     'Perfumes de diseñador, Neeche Passion, Premium y cuidado personal en Tizimín. Compra fácil, segura y con atención por WhatsApp.',
@@ -34,10 +35,10 @@ export const metadata: Metadata = {
     'perfumes nicho',
     'cuidado personal',
   ],
-  applicationName: 'Fraîche Tizimín',
+  applicationName: "KI'IBOK Exclusivo",
   alternates: { canonical: '/' },
   openGraph: {
-    title: 'Fraîche Tizimín',
+    title: "KI'IBOK Exclusivo",
     description: 'Encuentra la fragancia que habla de ti.',
     locale: 'es_MX',
     type: 'website',
@@ -53,12 +54,13 @@ export const viewport: Viewport = {
   colorScheme: 'light',
 };
 
-export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
+export default async function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
+  const siteContent = await getPublishedSiteContent();
   return (
     <html className={`${displayFont.variable} ${bodyFont.variable}`} data-scroll-behavior="smooth" lang="es-MX">
       <body>
         <AppProviders>
-          <SiteShell>{children}</SiteShell>
+          <SiteShell content={siteContent}>{children}</SiteShell>
         </AppProviders>
       </body>
     </html>

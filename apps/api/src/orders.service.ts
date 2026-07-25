@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
+  AdminNotificationType,
   CartStatus,
   OrderStatus,
   PaymentMethod,
@@ -16,6 +17,7 @@ import {
   ProductStatus,
   ReservationStatus,
   StockMovementType,
+  UserRole,
 } from '@prisma/client';
 import { CreateOrderDto, ListCustomerOrdersDto } from './order.dto';
 import { calculatePromotionDiscount, selectAppliedPromotions } from './commerce-rules';
@@ -371,6 +373,7 @@ export class OrdersService {
       input,
     );
     const customerName = [customer.firstName, customer.lastName].filter(Boolean).join(' ');
+    const paymentProvider = this.resolvePaymentProvider(input);
 
     const expiresAt = new Date(Date.now() + 30 * 60 * 1000);
     const order = await transaction.order.create({
@@ -462,11 +465,7 @@ export class OrdersService {
     await transaction.payment.create({
       data: {
         orderId: order.id,
-        provider:
-          input.paymentMethod === PaymentMethod.CARD ||
-          input.paymentMethod === PaymentMethod.PAYMENT_LINK
-          ? PaymentProvider.MERCADO_PAGO
-          : PaymentProvider.MANUAL,
+        provider: paymentProvider,
         method: input.paymentMethod,
         amountCents: order.totalCents,
       },
@@ -491,6 +490,27 @@ export class OrdersService {
       where: { id: cart.id },
       data: { status: CartStatus.CONVERTED, customerId },
     });
+
+    const notificationRecipients = await transaction.user.findMany({
+      where: {
+        isActive: true,
+        role: { in: [UserRole.ADMIN, UserRole.STAFF] },
+      },
+      select: { id: true },
+    });
+    if (notificationRecipients.length) {
+      await transaction.adminNotification.createMany({
+        data: notificationRecipients.map((recipient) => ({
+          userId: recipient.id,
+          type: AdminNotificationType.ORDER_CREATED,
+          title: 'Nuevo pedido recibido',
+          message: `${order.number} · ${customerName} · ${(order.totalCents / 100).toLocaleString('es-MX', { style: 'currency', currency: order.currency })}`,
+          orderId: order.id,
+        })),
+        skipDuplicates: true,
+      });
+    }
+
     await transaction.outboxEvent.create({
       data: {
         type: 'ORDER_CREATED',
@@ -505,6 +525,56 @@ export class OrdersService {
 
   private createOrderNumber() {
     return `FTZ-${Date.now().toString(36).toUpperCase()}-${randomUUID().slice(0, 6).toUpperCase()}`;
+  }
+
+  private resolvePaymentProvider(input: CreateOrderDto) {
+    if (input.paymentMethod === PaymentMethod.CARD) {
+      const provider = input.paymentProvider ?? PaymentProvider.MERCADO_PAGO;
+      if (
+        provider !== PaymentProvider.MERCADO_PAGO &&
+        provider !== PaymentProvider.STRIPE
+      ) {
+        throw new BadRequestException('Selecciona una pasarela valida para pagar con tarjeta.');
+      }
+      if (
+        provider === PaymentProvider.MERCADO_PAGO &&
+        (!this.config.get<string>('MERCADOPAGO_PUBLIC_KEY') ||
+          !this.config.get<string>('MERCADOPAGO_ACCESS_TOKEN') ||
+          !this.config.get<string>('MERCADOPAGO_WEBHOOK_SECRET'))
+      ) {
+        throw new BadRequestException('Mercado Pago no esta disponible temporalmente.');
+      }
+      if (
+        provider === PaymentProvider.STRIPE &&
+        (!this.config.get<string>('STRIPE_PUBLISHABLE_KEY') ||
+          !this.config.get<string>('STRIPE_SECRET_KEY') ||
+          !this.config.get<string>('STRIPE_WEBHOOK_SECRET'))
+      ) {
+        throw new BadRequestException('Stripe no esta disponible temporalmente.');
+      }
+      return provider;
+    }
+
+    if (input.paymentMethod === PaymentMethod.PAYMENT_LINK) {
+      if (
+        input.paymentProvider &&
+        input.paymentProvider !== PaymentProvider.MERCADO_PAGO
+      ) {
+        throw new BadRequestException('El link de pago utiliza Mercado Pago.');
+      }
+      if (
+        !this.config.get<string>('MERCADOPAGO_ACCESS_TOKEN') ||
+        !this.config.get<string>('MERCADOPAGO_WEBHOOK_SECRET')
+      ) {
+        throw new BadRequestException('El link de Mercado Pago no esta disponible temporalmente.');
+      }
+      return PaymentProvider.MERCADO_PAGO;
+    }
+
+    if (input.paymentProvider && input.paymentProvider !== PaymentProvider.MANUAL) {
+      throw new BadRequestException('Este metodo de pago no utiliza una pasarela.');
+    }
+    return PaymentProvider.MANUAL;
   }
 
   private serializeOrder(order: Prisma.OrderGetPayload<{ include: typeof orderInclude }>) {

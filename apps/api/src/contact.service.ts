@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { CartsService } from './carts.service';
 import { WhatsAppLinkQueryDto } from './contact.dto';
 import { OrdersService } from './orders.service';
+import { SiteContentService } from './content/site-content.service';
 
 @Injectable()
 export class ContactService {
@@ -10,6 +11,7 @@ export class ContactService {
     private readonly config: ConfigService,
     private readonly carts: CartsService,
     private readonly orders: OrdersService,
+    private readonly siteContent: SiteContentService,
   ) {}
 
   async whatsappLink(query: WhatsAppLinkQueryDto) {
@@ -47,7 +49,11 @@ export class ContactService {
       lines.push('Quiero informacion sobre sus perfumes.');
     }
 
-    const phone = (this.config.get<string>('WHATSAPP_PHONE') ?? '').replace(/\D/g, '');
+    const published = await this.siteContent.getPublished().catch(() => null);
+    const configuredPhone = published?.content.global.contact.whatsappPhone
+      ?? this.config.get<string>('WHATSAPP_PHONE')
+      ?? '';
+    const phone = configuredPhone.replace(/\D/g, '');
     if (!phone) throw new ServiceUnavailableException('Falta configurar WHATSAPP_PHONE.');
 
     const message = lines.join('\n');

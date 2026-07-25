@@ -22,12 +22,12 @@ export class CatalogService {
     return this.prisma.scentFamily.findMany({ orderBy: { name: 'asc' } });
   }
 
-  promotions() {
+  promotions(includeUpcoming = false) {
     const now = new Date();
     return this.prisma.promotion.findMany({
       where: {
         isActive: true,
-        startsAt: { lte: now },
+        ...(includeUpcoming ? {} : { startsAt: { lte: now } }),
         endsAt: { gte: now },
       },
       select: {

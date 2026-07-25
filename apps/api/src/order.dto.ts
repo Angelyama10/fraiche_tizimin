@@ -12,7 +12,7 @@ import {
   ValidateIf,
   ValidateNested,
 } from 'class-validator';
-import { DeliveryMethod, PaymentMethod } from '@prisma/client';
+import { DeliveryMethod, PaymentMethod, PaymentProvider } from '@prisma/client';
 
 export class ShippingAddressDto {
   @IsString()
@@ -71,6 +71,10 @@ export class CreateOrderDto {
 
   @IsEnum(PaymentMethod)
   paymentMethod!: PaymentMethod;
+
+  @IsOptional()
+  @IsEnum(PaymentProvider)
+  paymentProvider?: PaymentProvider;
 
   @IsEnum(DeliveryMethod)
   deliveryMethod!: DeliveryMethod;

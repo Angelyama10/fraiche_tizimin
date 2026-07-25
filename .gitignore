@@ -7,3 +7,5 @@ dist/
 !.env.example
 postgres_data/
 redis_data/
+deploy/production.env
+deploy/backups/

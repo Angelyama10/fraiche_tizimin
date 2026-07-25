@@ -6,7 +6,6 @@ import {
   ArrowRight,
   BadgePercent,
   BarChart3,
-  Bell,
   Boxes,
   Check,
   ChevronRight,
@@ -18,6 +17,7 @@ import {
   Menu,
   Package,
   PackageCheck,
+  PanelsTopLeft,
   Pencil,
   Plus,
   RefreshCw,
@@ -37,11 +37,14 @@ import { LINE_LABELS } from '@/lib/catalog';
 import { formatDate, formatMoney, initials } from '@/lib/format';
 import { FULFILLMENT_STATUS_LABELS, ORDER_STATUS_LABELS, PAYMENT_STATUS_LABELS, statusTone } from '@/lib/status';
 import type { Category, Paginated, ProductLine, ScentFamily } from '@/lib/types';
+import { BrandIdentity } from '@/components/site/brand-identity';
+import { AdminNotificationCenter } from './admin-notification-center';
+import { AdminSiteEditor } from './admin-site-editor';
 
 type AdminUser = { id: string; email: string; name: string; role: string };
 type AdminSession = { accessToken: string; expiresInSeconds: number; user: AdminUser };
-type Tab = 'dashboard' | 'products' | 'inventory' | 'orders' | 'promotions';
-type AdminRequest = <T>(path: string, init?: RequestInit) => Promise<T>;
+type Tab = 'dashboard' | 'products' | 'inventory' | 'orders' | 'promotions' | 'content';
+export type AdminRequest = <T>(path: string, init?: RequestInit) => Promise<T>;
 
 type Dashboard = {
   generatedAt: string;
@@ -76,7 +79,9 @@ type AdminOrder = {
 
 type AdminPromotion = {
   id: string; slug: string; code: string | null; name: string; description?: string | null; type: string; value: number; placement: string;
-  startsAt: string; endsAt: string; isActive: boolean; isFeatured: boolean; uses: number; _count?: { orders: number };
+  minimumCents: number; maximumDiscountCents?: number | null; maximumUses?: number | null; perCustomerLimit?: number | null;
+  startsAt: string; endsAt: string; isActive: boolean; isFeatured: boolean; requiresCode: boolean; isStackable: boolean;
+  priority: number; uses: number; _count?: { orders: number };
 };
 
 const nav: Array<{ id: Tab; label: string; icon: typeof BarChart3 }> = [
@@ -85,6 +90,7 @@ const nav: Array<{ id: Tab; label: string; icon: typeof BarChart3 }> = [
   { id: 'inventory', label: 'Inventario', icon: Boxes },
   { id: 'orders', label: 'Pedidos', icon: Package },
   { id: 'promotions', label: 'Promociones', icon: BadgePercent },
+  { id: 'content', label: 'Contenido de tienda', icon: PanelsTopLeft },
 ];
 
 const SESSION_KEY = 'fraiche_admin_session';
@@ -117,7 +123,7 @@ function AdminLogin({ onLogin }: { onLogin: (session: AdminSession) => void }) {
     finally { setLoading(false); }
   }
 
-  return <main className="adminLogin"><div className="adminLogin__brand"><span className="brandMark__monogram">F</span><span><strong>Fraîche Tizimín</strong><small>Centro de operaciones</small></span></div><form onSubmit={submit}><KeyRound size={23} /><span className="adminEyebrow">Acceso de personal</span><h1>Bienvenida de vuelta.</h1><p>Administra catálogo, inventario, pedidos y campañas.</p>{error && <div className="adminError"><AlertTriangle size={16} /> {error}</div>}<label><span>Correo administrativo</span><input autoComplete="username" name="email" required type="email" /></label><label><span>Contraseña</span><input autoComplete="current-password" minLength={10} name="password" required type="password" /></label><button className="adminPrimaryButton" disabled={loading} type="submit">{loading ? <span className="buttonSpinner" /> : <>Entrar al panel <ArrowRight size={17} /></>}</button><small>El usuario se crea desde `ADMIN_EMAIL` y `ADMIN_PASSWORD` al iniciar la API.</small></form><Link href="/"><ArrowLeft size={15} /> Volver a la tienda</Link></main>;
+  return <main className="adminLogin"><div className="adminLogin__brand"><BrandIdentity compact /><small>Centro de operaciones</small></div><div aria-hidden="true" className="adminLogin__visual"><BrandIdentity inverted /><p>Cada pedido, una experiencia cuidada.</p></div><form onSubmit={submit}><KeyRound size={23} /><span className="adminEyebrow">Acceso de personal</span><h1>Bienvenida de vuelta.</h1><p>Administra catálogo, inventario, pedidos y campañas.</p>{error && <div className="adminError"><AlertTriangle size={16} /> {error}</div>}<label><span>Correo administrativo</span><input autoComplete="username" name="email" required type="email" /></label><label><span>Contraseña</span><input autoComplete="current-password" minLength={10} name="password" required type="password" /></label><button className="adminPrimaryButton" disabled={loading} type="submit">{loading ? <span className="buttonSpinner" /> : <>Entrar al panel <ArrowRight size={17} /></>}</button><small>Acceso protegido para personal autorizado.</small></form><Link href="/"><ArrowLeft size={15} /> Volver a la tienda</Link></main>;
 }
 
 function AdminWorkspace({ session, onLogout }: { session: AdminSession; onLogout: () => void }) {
@@ -132,8 +138,8 @@ function AdminWorkspace({ session, onLogout }: { session: AdminSession; onLogout
   const [promotions, setPromotions] = useState<AdminPromotion[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [scents, setScents] = useState<ScentFamily[]>([]);
-  const [modal, setModal] = useState<'product' | 'inventory' | 'promotion' | 'shipment' | 'price' | null>(null);
-  const [selected, setSelected] = useState<InventoryItem | AdminOrder | AdminProduct | null>(null);
+  const [modal, setModal] = useState<'product' | 'inventory' | 'promotion' | 'promotion-edit' | 'shipment' | 'price' | null>(null);
+  const [selected, setSelected] = useState<InventoryItem | AdminOrder | AdminProduct | AdminPromotion | null>(null);
   const [notice, setNotice] = useState<{ tone: 'success' | 'error'; message: string } | null>(null);
 
   const request = useCallback<AdminRequest>(async (path, init = {}) => {
@@ -168,13 +174,56 @@ function AdminWorkspace({ session, onLogout }: { session: AdminSession; onLogout
 
   const tabLabel = nav.find((item) => item.id === tab)?.label;
 
-  return <main className="adminShell"><aside className={`adminSidebar ${menuOpen ? 'isOpen' : ''}`}><div className="adminSidebar__brand"><span className="brandMark__monogram">F</span><div><strong>Fraîche</strong><small>Operaciones</small></div><button aria-label="Cerrar menú" onClick={() => setMenuOpen(false)} type="button"><X size={18} /></button></div><nav>{nav.map((item) => <button className={tab === item.id ? 'isActive' : ''} key={item.id} onClick={() => { setTab(item.id); setMenuOpen(false); }} type="button"><item.icon size={18} /><span>{item.label}</span><ChevronRight size={14} /></button>)}</nav><div className="adminSidebar__user"><span>{initials(session.user.name.split(' ')[0], session.user.name.split(' ')[1])}</span><div><strong>{session.user.name}</strong><small>{session.user.role}</small></div><button aria-label="Cerrar sesión" onClick={onLogout} title="Cerrar sesión" type="button"><LogOut size={16} /></button></div></aside>{menuOpen && <button aria-label="Cerrar menú" className="adminBackdrop" onClick={() => setMenuOpen(false)} type="button" />}<section className="adminWorkspace"><header className="adminTopbar"><button aria-label="Abrir menú" onClick={() => setMenuOpen(true)} type="button"><Menu size={20} /></button><div><span>Administración</span><strong>{tabLabel}</strong></div><div><button aria-label="Actualizar datos" onClick={() => setRefreshKey((value) => value + 1)} title="Actualizar" type="button"><RefreshCw size={18} /></button><button aria-label="Notificaciones" title="Notificaciones" type="button"><Bell size={18} />{(dashboard?.inventory.openAlerts ?? 0) > 0 && <i />}</button><Link aria-label="Ver tienda" href="/" title="Ver tienda"><Eye size={18} /></Link></div></header>{notice && <div className={`adminNotice adminNotice--${notice.tone}`}><span>{notice.message}</span><button aria-label="Cerrar" onClick={() => setNotice(null)} type="button"><X size={15} /></button></div>}<div className="adminContent">{loading ? <AdminLoading /> : <>{tab === 'dashboard' && <DashboardTab dashboard={dashboard} onTab={setTab} />}{tab === 'products' && <ProductsTab products={products} onCreate={() => open('product')} onEditPrice={(product) => open('price', product)} request={request} onSuccess={actionSuccess} />}{tab === 'inventory' && <InventoryTab inventory={inventory} onAdjust={(item) => open('inventory', item)} />}{tab === 'orders' && <OrdersTab orders={orders} onShipment={(order) => open('shipment', order)} request={request} onSuccess={actionSuccess} />}{tab === 'promotions' && <PromotionsTab promotions={promotions} onCreate={() => open('promotion')} request={request} onSuccess={actionSuccess} />}</>}</div></section>{modal && <AdminModal title={modalTitle(modal)} onClose={() => setModal(null)}>{modal === 'product' && <ProductForm categories={categories} scents={scents} request={request} onSuccess={actionSuccess} />}{modal === 'inventory' && selected && <InventoryForm item={selected as InventoryItem} request={request} onSuccess={actionSuccess} />}{modal === 'price' && selected && <PriceForm product={selected as AdminProduct} request={request} onSuccess={actionSuccess} />}{modal === 'promotion' && <PromotionForm request={request} onSuccess={actionSuccess} />}{modal === 'shipment' && selected && <ShipmentForm order={selected as AdminOrder} request={request} onSuccess={actionSuccess} />}</AdminModal>}</main>;
+  return (
+    <main className="adminShell">
+      <aside className={`adminSidebar ${menuOpen ? 'isOpen' : ''}`}>
+        <div className="adminSidebar__brand"><BrandIdentity compact inverted /><button aria-label="Cerrar menú" onClick={() => setMenuOpen(false)} type="button"><X size={18} /></button></div>
+        <nav>{nav.map((item) => <button className={tab === item.id ? 'isActive' : ''} key={item.id} onClick={() => { setTab(item.id); setMenuOpen(false); }} type="button"><item.icon size={18} /><span>{item.label}</span><ChevronRight size={14} /></button>)}</nav>
+        <div className="adminSidebar__user"><span>{initials(session.user.name.split(' ')[0], session.user.name.split(' ')[1])}</span><div><strong>{session.user.name}</strong><small>{session.user.role}</small></div><button aria-label="Cerrar sesión" onClick={onLogout} title="Cerrar sesión" type="button"><LogOut size={16} /></button></div>
+      </aside>
+      {menuOpen && <button aria-label="Cerrar menú" className="adminBackdrop" onClick={() => setMenuOpen(false)} type="button" />}
+      <section className="adminWorkspace">
+        <header className="adminTopbar">
+          <button aria-label="Abrir menú" onClick={() => setMenuOpen(true)} type="button"><Menu size={20} /></button>
+          <div><span>Administración</span><strong>{tabLabel}</strong></div>
+          <div>
+            <button aria-label="Actualizar datos" onClick={() => setRefreshKey((value) => value + 1)} title="Actualizar" type="button"><RefreshCw size={18} /></button>
+            <AdminNotificationCenter
+              onNewOrder={() => setRefreshKey((value) => value + 1)}
+              onOpenOrders={() => setTab('orders')}
+              request={request}
+            />
+            <Link aria-label="Ver tienda" href="/" title="Ver tienda"><Eye size={18} /></Link>
+          </div>
+        </header>
+        {notice && <div className={`adminNotice adminNotice--${notice.tone}`}><span>{notice.message}</span><button aria-label="Cerrar" onClick={() => setNotice(null)} type="button"><X size={15} /></button></div>}
+        <div className="adminContent">
+          {loading ? <AdminLoading /> : <>
+            {tab === 'dashboard' && <DashboardTab dashboard={dashboard} onTab={setTab} />}
+            {tab === 'products' && <ProductsTab products={products} onCreate={() => open('product')} onEditPrice={(product) => open('price', product)} request={request} onSuccess={actionSuccess} />}
+            {tab === 'inventory' && <InventoryTab inventory={inventory} onAdjust={(item) => open('inventory', item)} />}
+            {tab === 'orders' && <OrdersTab orders={orders} onShipment={(order) => open('shipment', order)} request={request} onSuccess={actionSuccess} />}
+            {tab === 'promotions' && <PromotionsTab promotions={promotions} onCreate={() => open('promotion')} onEdit={(promotion) => open('promotion-edit', promotion)} request={request} onSuccess={actionSuccess} />}
+            {tab === 'content' && <AdminSiteEditor onNotice={(tone, message) => setNotice({ tone, message })} request={request} />}
+          </>}
+        </div>
+      </section>
+      {modal && <AdminModal title={modalTitle(modal)} onClose={() => setModal(null)}>
+        {modal === 'product' && <ProductForm categories={categories} scents={scents} request={request} onSuccess={actionSuccess} />}
+        {modal === 'inventory' && selected && <InventoryForm item={selected as InventoryItem} request={request} onSuccess={actionSuccess} />}
+        {modal === 'price' && selected && <PriceForm product={selected as AdminProduct} request={request} onSuccess={actionSuccess} />}
+        {modal === 'promotion' && <PromotionForm request={request} onSuccess={actionSuccess} />}
+        {modal === 'promotion-edit' && selected && <PromotionForm promotion={selected as AdminPromotion} request={request} onSuccess={actionSuccess} />}
+        {modal === 'shipment' && selected && <ShipmentForm order={selected as AdminOrder} request={request} onSuccess={actionSuccess} />}
+      </AdminModal>}
+    </main>
+  );
 }
 
 function DashboardTab({ dashboard, onTab }: { dashboard: Dashboard | null; onTab: (tab: Tab) => void }) {
   if (!dashboard) return null;
   const pendingOrders = dashboard.orders.byStatus.PENDING_PAYMENT ?? 0;
-  return <><div className="adminPageHeading"><div><span className="adminEyebrow">Hoy en la tienda</span><h1>Un vistazo a Fraîche</h1><p>Actualizado {formatDate(dashboard.generatedAt, { dateStyle: undefined, day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</p></div></div><div className="adminMetrics"><Metric icon={CircleDollarSign} label="Ventas del mes" value={formatMoney(dashboard.revenue.monthCents)} note={`${dashboard.revenue.monthOrders} pedidos pagados`} tone="green" /><Metric icon={ShoppingBag} label="Ventas de hoy" value={formatMoney(dashboard.revenue.todayCents)} note={`${dashboard.revenue.todayOrders} pedidos`} tone="coral" /><Metric icon={Package} label="Pendientes" value={String(pendingOrders)} note="Esperando pago" tone="yellow" /><Metric icon={AlertTriangle} label="Alertas de stock" value={String(dashboard.inventory.openAlerts)} note={`${dashboard.inventory.outOfStock} agotados`} tone="red" /></div><div className="adminDashboardGrid"><section className="adminPanel adminPanel--orders"><div className="adminPanel__heading"><div><span className="adminEyebrow">Actividad</span><h2>Pedidos recientes</h2></div><button onClick={() => onTab('orders')} type="button">Ver todos <ArrowRight size={14} /></button></div><AdminOrdersTable orders={dashboard.recentOrders} compact /></section><section className="adminPanel"><div className="adminPanel__heading"><div><span className="adminEyebrow">Inventario</span><h2>Existencias</h2></div><button onClick={() => onTab('inventory')} type="button">Gestionar <ArrowRight size={14} /></button></div><div className="inventorySummary"><div><strong>{dashboard.inventory.available}</strong><span>Disponibles</span></div><div><strong>{dashboard.inventory.reserved}</strong><span>Reservados</span></div><div><strong>{dashboard.inventory.lowStock}</strong><span>Por agotarse</span></div><div><strong>{dashboard.inventory.outOfStock}</strong><span>Agotados</span></div></div><div className="stockBar"><span style={{ width: `${Math.min(100, (dashboard.inventory.available / Math.max(1, dashboard.inventory.onHand)) * 100)}%` }} /></div><small>{dashboard.inventory.onHand} unidades registradas</small></section></div></>;
+  return <><div className="adminPageHeading"><div><span className="adminEyebrow">Hoy en la tienda</span><h1>Un vistazo a KI&apos;IBOK</h1><p>Actualizado {formatDate(dashboard.generatedAt, { dateStyle: undefined, day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</p></div></div><div className="adminMetrics"><Metric icon={CircleDollarSign} label="Ventas del mes" value={formatMoney(dashboard.revenue.monthCents)} note={`${dashboard.revenue.monthOrders} pedidos pagados`} tone="green" /><Metric icon={ShoppingBag} label="Ventas de hoy" value={formatMoney(dashboard.revenue.todayCents)} note={`${dashboard.revenue.todayOrders} pedidos`} tone="coral" /><Metric icon={Package} label="Pendientes" value={String(pendingOrders)} note="Esperando pago" tone="yellow" /><Metric icon={AlertTriangle} label="Alertas de stock" value={String(dashboard.inventory.openAlerts)} note={`${dashboard.inventory.outOfStock} agotados`} tone="red" /></div><div className="adminDashboardGrid"><section className="adminPanel adminPanel--orders"><div className="adminPanel__heading"><div><span className="adminEyebrow">Actividad</span><h2>Pedidos recientes</h2></div><button onClick={() => onTab('orders')} type="button">Ver todos <ArrowRight size={14} /></button></div><AdminOrdersTable orders={dashboard.recentOrders} compact /></section><section className="adminPanel"><div className="adminPanel__heading"><div><span className="adminEyebrow">Inventario</span><h2>Existencias</h2></div><button onClick={() => onTab('inventory')} type="button">Gestionar <ArrowRight size={14} /></button></div><div className="inventorySummary"><div><strong>{dashboard.inventory.available}</strong><span>Disponibles</span></div><div><strong>{dashboard.inventory.reserved}</strong><span>Reservados</span></div><div><strong>{dashboard.inventory.lowStock}</strong><span>Por agotarse</span></div><div><strong>{dashboard.inventory.outOfStock}</strong><span>Agotados</span></div></div><div className="stockBar"><span style={{ width: `${Math.min(100, (dashboard.inventory.available / Math.max(1, dashboard.inventory.onHand)) * 100)}%` }} /></div><small>{dashboard.inventory.onHand} unidades registradas</small></section></div></>;
 }
 
 function ProductsTab({ products, onCreate, onEditPrice, request, onSuccess }: { products: AdminProduct[]; onCreate: () => void; onEditPrice: (product: AdminProduct) => void; request: AdminRequest; onSuccess: (message: string) => void }) {
@@ -194,9 +243,9 @@ function OrdersTab({ orders, onShipment, request, onSuccess }: { orders: AdminOr
   return <><AdminHeading eyebrow="Ventas y entregas" title="Pedidos" description={`${orders.length} pedidos en el historial`} /><AdminSearch value={query} onChange={setQuery} placeholder="Buscar folio, cliente o correo" /><div className="adminTableWrap"><table className="adminTable"><thead><tr><th>Pedido</th><th>Cliente</th><th>Pago</th><th>Preparación</th><th>Total</th><th>Acciones</th></tr></thead><tbody>{visible.map((order) => <tr key={order.publicToken}><td><div className="tablePrimary"><span><Package size={16} /></span><div><strong>{order.number}</strong><small>{formatDate(order.createdAt)}</small></div></div></td><td><strong>{order.customerName}</strong></td><td><span className={`adminStatus adminStatus--${statusTone(order.paymentStatus)}`}>{PAYMENT_STATUS_LABELS[order.paymentStatus] ?? order.paymentStatus}</span></td><td><select className="adminInlineSelect" onChange={(event) => updateStatus(order, event.target.value)} value={order.status}>{['PENDING_PAYMENT', 'CONFIRMED', 'PROCESSING', 'READY', 'COMPLETED', 'CANCELLED'].map((status) => <option key={status} value={status}>{ORDER_STATUS_LABELS[status]}</option>)}</select></td><td><strong>{formatMoney(order.totalCents, order.currency)}</strong></td><td><div className="tableActions"><button className="adminSecondaryButton" onClick={() => onShipment(order)} type="button"><Truck size={14} /> Guía</button></div></td></tr>)}</tbody></table></div></>;
 }
 
-function PromotionsTab({ promotions, onCreate, request, onSuccess }: { promotions: AdminPromotion[]; onCreate: () => void; request: AdminRequest; onSuccess: (message: string) => void }) {
+function PromotionsTab({ promotions, onCreate, onEdit, request, onSuccess }: { promotions: AdminPromotion[]; onCreate: () => void; onEdit: (promotion: AdminPromotion) => void; request: AdminRequest; onSuccess: (message: string) => void }) {
   async function toggle(item: AdminPromotion) { try { await request(`/admin/promotions/${item.id}`, { method: 'PATCH', body: JSON.stringify({ isActive: !item.isActive }) }); onSuccess('Promoción actualizada.'); } catch (error) { window.alert(errorMessage(error)); } }
-  return <><AdminHeading eyebrow="Campañas" title="Promociones" description={`${promotions.filter((item) => item.isActive).length} promociones activas`} action={<button className="adminPrimaryButton" onClick={onCreate} type="button"><Plus size={16} /> Nueva promoción</button>} /><div className="promotionAdminGrid">{promotions.map((item) => <article key={item.id}><div><span className="adminTag">{item.placement}</span><button className={`adminSwitch ${item.isActive ? 'isActive' : ''}`} aria-label={item.isActive ? 'Desactivar promoción' : 'Activar promoción'} onClick={() => toggle(item)} type="button"><i /></button></div><Tag size={21} /><h3>{item.name}</h3><p>{item.description}</p><div><strong>{item.type === 'PERCENTAGE' ? `${item.value}%` : formatMoney(item.value)}</strong>{item.code && <code>{item.code}</code>}</div><small>{formatDate(item.startsAt)} – {formatDate(item.endsAt)}</small></article>)}</div></>;
+  return <><AdminHeading eyebrow="Campañas" title="Promociones" description={`${promotions.filter((item) => item.isActive).length} promociones activas`} action={<button className="adminPrimaryButton" onClick={onCreate} type="button"><Plus size={16} /> Nueva promoción</button>} /><div className="promotionAdminGrid">{promotions.map((item) => <article key={item.id}><div><span className="adminTag">{item.placement}</span><div className="promotionAdminGrid__actions"><button aria-label={`Editar ${item.name}`} className="promotionEditButton" onClick={() => onEdit(item)} title="Editar promoción" type="button"><Pencil size={14} /> Editar</button><button className={`adminSwitch ${item.isActive ? 'isActive' : ''}`} aria-label={item.isActive ? 'Desactivar promoción' : 'Activar promoción'} onClick={() => toggle(item)} type="button"><i /></button></div></div><Tag size={21} /><h3>{item.name}</h3><p>{item.description}</p><div><strong>{item.type === 'PERCENTAGE' ? `${item.value}%` : formatMoney(item.value)}</strong>{item.code && <code>{item.code}</code>}</div><small>{formatDate(item.startsAt)} – {formatDate(item.endsAt)}</small></article>)}</div></>;
 }
 
 function AdminOrdersTable({ orders, compact }: { orders: AdminOrder[]; compact?: boolean }) { return <div className="adminTableWrap"><table className="adminTable"><thead><tr><th>Pedido</th><th>Cliente</th><th>Estado</th><th>Total</th></tr></thead><tbody>{orders.slice(0, compact ? 8 : orders.length).map((order) => <tr key={order.publicToken}><td><div className="tablePrimary"><span><Package size={15} /></span><div><strong>{order.number}</strong><small>{formatDate(order.createdAt)}</small></div></div></td><td>{order.customerName}</td><td><span className={`adminStatus adminStatus--${statusTone(order.status)}`}>{ORDER_STATUS_LABELS[order.status] ?? order.status}</span></td><td><strong>{formatMoney(order.totalCents, order.currency)}</strong></td></tr>)}</tbody></table></div>; }
@@ -211,7 +260,93 @@ function InventoryForm({ item, request, onSuccess }: { item: InventoryItem; requ
 
 function PriceForm({ product, request, onSuccess }: { product: AdminProduct; request: AdminRequest; onSuccess: (message: string) => void }) { const [saving, setSaving] = useState(false); async function submit(event: FormEvent<HTMLFormElement>) { event.preventDefault(); const form = new FormData(event.currentTarget); const variantId = String(form.get('variantId')); const price = Number(form.get('price')); setSaving(true); try { await request(`/admin/variants/${variantId}`, { method: 'PATCH', body: JSON.stringify({ catalogPriceCents: Math.round(price * 100) }) }); onSuccess('Precio actualizado.'); } catch (error) { window.alert(errorMessage(error)); } finally { setSaving(false); } } return <form className="adminForm" onSubmit={submit}><div className="adminFormContext"><Tag size={19} /><div><strong>{product.name}</strong><small>{LINE_LABELS[product.line]}</small></div></div><AdminField label="Variante"><select name="variantId">{product.variants.map((variant) => <option key={variant.id} value={variant.id}>{variant.name} · {variant.sku}</option>)}</select></AdminField><AdminField label="Nuevo precio MXN"><input defaultValue={(product.variants[0]?.catalogPriceCents ?? 0) / 100} min="0" name="price" required step="0.01" type="number" /></AdminField><p className="adminFormHint">Neeche Passion y Premium toman el precio fijo de su política de línea.</p><button className="adminPrimaryButton adminPrimaryButton--wide" disabled={saving} type="submit">{saving ? <span className="buttonSpinner" /> : 'Actualizar precio'}</button></form>; }
 
-function PromotionForm({ request, onSuccess }: { request: AdminRequest; onSuccess: (message: string) => void }) { const [saving, setSaving] = useState(false); async function submit(event: FormEvent<HTMLFormElement>) { event.preventDefault(); const form = new FormData(event.currentTarget); setSaving(true); try { await request('/admin/promotions', { method: 'POST', body: JSON.stringify({ slug: form.get('slug'), code: form.get('code') || undefined, name: form.get('name'), description: form.get('description') || undefined, type: form.get('type'), value: Number(form.get('value')), minimumCents: Math.round(Number(form.get('minimum') || 0) * 100), startsAt: new Date(String(form.get('startsAt'))).toISOString(), endsAt: new Date(String(form.get('endsAt'))).toISOString(), placement: form.get('placement'), isActive: true, isFeatured: form.get('isFeatured') === 'on', requiresCode: Boolean(form.get('code')), isStackable: form.get('isStackable') === 'on', priority: Number(form.get('priority') || 0) }) }); onSuccess('Promoción publicada.'); } catch (error) { window.alert(errorMessage(error)); } finally { setSaving(false); } } const tomorrow = new Date(Date.now() + 86400000).toISOString().slice(0, 16); const month = new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 16); return <form className="adminForm" onSubmit={submit}><div className="adminFormGrid"><AdminField label="Nombre"><input name="name" required /></AdminField><AdminField label="Slug"><input name="slug" pattern="[a-z0-9-]+" required /></AdminField></div><AdminField label="Descripción"><textarea maxLength={500} name="description" rows={3} /></AdminField><div className="adminFormGrid"><AdminField label="Tipo"><select name="type"><option value="PERCENTAGE">Porcentaje</option><option value="FIXED_AMOUNT">Monto fijo en centavos</option></select></AdminField><AdminField label="Valor"><input min="1" name="value" required type="number" /></AdminField><AdminField label="Código opcional"><input maxLength={60} name="code" /></AdminField><AdminField label="Compra mínima MXN"><input min="0" name="minimum" type="number" /></AdminField><AdminField label="Ubicación"><select name="placement"><option value="GENERAL">General</option><option value="DAILY">Oferta del día</option><option value="MONTHLY">Oferta del mes</option><option value="FLASH">Flash</option><option value="WELCOME">Bienvenida</option></select></AdminField><AdminField label="Prioridad"><input defaultValue="0" name="priority" type="number" /></AdminField><AdminField label="Inicia"><input defaultValue={tomorrow} name="startsAt" required type="datetime-local" /></AdminField><AdminField label="Termina"><input defaultValue={month} name="endsAt" required type="datetime-local" /></AdminField></div><div className="adminFormChecks"><label><input name="isFeatured" type="checkbox" /> Destacada</label><label><input name="isStackable" type="checkbox" /> Acumulable</label></div><button className="adminPrimaryButton adminPrimaryButton--wide" disabled={saving} type="submit">{saving ? <span className="buttonSpinner" /> : <><Send size={15} /> Publicar promoción</>}</button></form>; }
+function toDateTimeLocal(value: string | Date) {
+  const date = new Date(value);
+  return new Date(date.getTime() - date.getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
+}
+
+function normalizeSlug(value: string) {
+  return value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+}
+
+function PromotionForm({ promotion, request, onSuccess }: { promotion?: AdminPromotion; request: AdminRequest; onSuccess: (message: string) => void }) {
+  const [saving, setSaving] = useState(false);
+  const defaultStart = toDateTimeLocal(promotion?.startsAt ?? new Date(Date.now() + 15 * 60_000));
+  const defaultEnd = toDateTimeLocal(promotion?.endsAt ?? new Date(Date.now() + 30 * 86400000));
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    const type = String(form.get('type'));
+    const startsAt = new Date(String(form.get('startsAt')));
+    const endsAt = new Date(String(form.get('endsAt')));
+    if (endsAt <= startsAt) {
+      window.alert('La fecha de término debe ser posterior al inicio.');
+      return;
+    }
+
+    const enteredValue = Number(form.get('value'));
+    const code = String(form.get('code') ?? '').trim();
+    const payload = {
+      slug: form.get('slug'),
+      code: code || (promotion ? '' : undefined),
+      name: form.get('name'),
+      description: String(form.get('description') ?? '').trim(),
+      type,
+      value: type === 'FIXED_AMOUNT' ? Math.round(enteredValue * 100) : Math.round(enteredValue),
+      minimumCents: Math.round(Number(form.get('minimum') || 0) * 100),
+      startsAt: startsAt.toISOString(),
+      endsAt: endsAt.toISOString(),
+      placement: form.get('placement'),
+      isActive: form.get('isActive') === 'on',
+      isFeatured: form.get('isFeatured') === 'on',
+      requiresCode: Boolean(code),
+      isStackable: form.get('isStackable') === 'on',
+      priority: Number(form.get('priority') || 0),
+    };
+
+    setSaving(true);
+    try {
+      await request(promotion ? `/admin/promotions/${promotion.id}` : '/admin/promotions', {
+        method: promotion ? 'PATCH' : 'POST',
+        body: JSON.stringify(payload),
+      });
+      onSuccess(promotion ? 'Promoción actualizada.' : 'Promoción publicada.');
+    } catch (error) {
+      window.alert(errorMessage(error));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const displayValue = promotion
+    ? promotion.type === 'FIXED_AMOUNT' ? promotion.value / 100 : promotion.value
+    : '';
+
+  return <form className="adminForm" onSubmit={submit}>
+    {promotion && <div className="adminFormContext"><Pencil size={19} /><div><strong>{promotion.name}</strong><small>{promotion.uses} usos registrados</small></div></div>}
+    <div className="adminFormGrid"><AdminField label="Nombre"><input defaultValue={promotion?.name} name="name" required /></AdminField><AdminField label="Slug"><input defaultValue={promotion ? normalizeSlug(promotion.slug) : ''} name="slug" pattern="[a-z0-9]+(?:-[a-z0-9]+)*" required /></AdminField></div>
+    <AdminField label="Descripción"><textarea defaultValue={promotion?.description ?? ''} maxLength={500} name="description" rows={3} /></AdminField>
+    <div className="adminFormGrid">
+      <AdminField label="Tipo"><select defaultValue={promotion?.type ?? 'PERCENTAGE'} name="type"><option value="PERCENTAGE">Porcentaje</option><option value="FIXED_AMOUNT">Monto fijo MXN</option></select></AdminField>
+      <AdminField label="Valor"><input defaultValue={displayValue} min="1" name="value" required step="0.01" type="number" /></AdminField>
+      <AdminField label="Código opcional"><input defaultValue={promotion?.code ?? ''} maxLength={60} name="code" /></AdminField>
+      <AdminField label="Compra mínima MXN"><input defaultValue={(promotion?.minimumCents ?? 0) / 100} min="0" name="minimum" step="0.01" type="number" /></AdminField>
+      <AdminField label="Ubicación"><select defaultValue={promotion?.placement ?? 'GENERAL'} name="placement"><option value="GENERAL">General</option><option value="DAILY">Oferta del día</option><option value="MONTHLY">Oferta del mes</option><option value="FLASH">Flash</option><option value="WELCOME">Bienvenida</option></select></AdminField>
+      <AdminField label="Prioridad"><input defaultValue={promotion?.priority ?? 0} name="priority" type="number" /></AdminField>
+      <AdminField label="Inicia"><input defaultValue={defaultStart} name="startsAt" required type="datetime-local" /></AdminField>
+      <AdminField label="Termina"><input defaultValue={defaultEnd} name="endsAt" required type="datetime-local" /></AdminField>
+    </div>
+    <div className="adminFormChecks"><label><input defaultChecked={promotion?.isActive ?? true} name="isActive" type="checkbox" /> Activa</label><label><input defaultChecked={promotion?.isFeatured} name="isFeatured" type="checkbox" /> Destacada</label><label><input defaultChecked={promotion?.isStackable} name="isStackable" type="checkbox" /> Acumulable</label></div>
+    <button className="adminPrimaryButton adminPrimaryButton--wide" disabled={saving} type="submit">{saving ? <span className="buttonSpinner" /> : <><Send size={15} /> {promotion ? 'Guardar cambios' : 'Publicar promoción'}</>}</button>
+  </form>;
+}
 
 function ShipmentForm({ order, request, onSuccess }: { order: AdminOrder; request: AdminRequest; onSuccess: (message: string) => void }) { const [saving, setSaving] = useState(false); async function submit(event: FormEvent<HTMLFormElement>) { event.preventDefault(); const form = new FormData(event.currentTarget); setSaving(true); try { await request(`/admin/orders/${order.publicToken}/shipments`, { method: 'POST', body: JSON.stringify({ carrier: form.get('carrier'), service: form.get('service') || undefined, trackingNumber: form.get('trackingNumber'), trackingUrl: form.get('trackingUrl') || undefined, status: 'LABEL_CREATED', estimatedDeliveryAt: form.get('estimatedDeliveryAt') ? new Date(String(form.get('estimatedDeliveryAt'))).toISOString() : undefined, notes: form.get('notes') || undefined }) }); onSuccess('Guía registrada y cliente notificado.'); } catch (error) { window.alert(errorMessage(error)); } finally { setSaving(false); } } return <form className="adminForm" onSubmit={submit}><div className="adminFormContext"><Truck size={19} /><div><strong>{order.number}</strong><small>{order.customerName} · {formatMoney(order.totalCents, order.currency)}</small></div></div><div className="adminFormGrid"><AdminField label="Paquetería"><input name="carrier" placeholder="DHL, Estafeta..." required /></AdminField><AdminField label="Servicio"><input name="service" placeholder="Express" /></AdminField></div><AdminField label="Código de rastreo"><input name="trackingNumber" required /></AdminField><AdminField label="URL HTTPS de seguimiento"><input name="trackingUrl" placeholder="https://..." type="url" /></AdminField><AdminField label="Entrega estimada"><input name="estimatedDeliveryAt" type="datetime-local" /></AdminField><AdminField label="Notas internas"><textarea maxLength={500} name="notes" rows={3} /></AdminField><button className="adminPrimaryButton adminPrimaryButton--wide" disabled={saving} type="submit">{saving ? <span className="buttonSpinner" /> : <><Truck size={15} /> Registrar guía</>}</button></form>; }
 
@@ -221,4 +356,4 @@ function AdminSearch({ value, onChange, placeholder }: { value: string; onChange
 function AdminField({ label, children }: { label: string; children: React.ReactNode }) { return <label className="adminField"><span>{label}</span>{children}</label>; }
 function Metric({ icon: Icon, label, value, note, tone }: { icon: typeof BarChart3; label: string; value: string; note: string; tone: string }) { return <article className={`adminMetric adminMetric--${tone}`}><span><Icon size={19} /></span><small>{label}</small><strong>{value}</strong><p>{note}</p></article>; }
 function AdminLoading() { return <div className="adminLoading"><span /><div>{Array.from({ length: 4 }, (_, index) => <i key={index} />)}</div><b /></div>; }
-function modalTitle(modal: string) { return ({ product: 'Nuevo producto', inventory: 'Ajustar inventario', promotion: 'Nueva promoción', shipment: 'Registrar guía', price: 'Actualizar precio' } as Record<string, string>)[modal] ?? 'Administrar'; }
+function modalTitle(modal: string) { return ({ product: 'Nuevo producto', inventory: 'Ajustar inventario', promotion: 'Nueva promoción', 'promotion-edit': 'Editar promoción', shipment: 'Registrar guía', price: 'Actualizar precio' } as Record<string, string>)[modal] ?? 'Administrar'; }

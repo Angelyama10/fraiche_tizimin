@@ -24,7 +24,10 @@ function validateProductionEnvironment() {
     'SMTP_HOST',
     'SMTP_FROM',
     'ADMIN_NOTIFICATION_EMAIL',
-    'STORAGE_BUCKET',
+    'STORAGE_ENDPOINT',
+    'STORAGE_PRIVATE_BUCKET',
+    'STORAGE_PRIVATE_URL',
+    'STORAGE_PUBLIC_BUCKET',
     'STORAGE_ACCESS_KEY',
     'STORAGE_SECRET_KEY',
     'STORAGE_PUBLIC_URL',
@@ -53,7 +56,11 @@ function validateProductionEnvironment() {
 
 async function bootstrap() {
   validateProductionEnvironment();
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create(AppModule, { rawBody: true });
+
+  if (process.env.NODE_ENV === 'production') {
+    app.getHttpAdapter().getInstance().set('trust proxy', 1);
+  }
 
   app.setGlobalPrefix('api/v1');
   app.use(helmet());
@@ -70,12 +77,14 @@ async function bootstrap() {
     }),
   );
 
-  const swaggerConfig = new DocumentBuilder()
-    .setTitle('Fraiche Tizimin API')
-    .setDescription('Catalogo, clientes, carrito, ordenes, pagos, envios y operacion administrativa.')
-    .setVersion('1.0')
-    .build();
-  SwaggerModule.setup('docs', app, SwaggerModule.createDocument(app, swaggerConfig));
+  if (process.env.NODE_ENV !== 'production' || process.env.ENABLE_SWAGGER === 'true') {
+    const swaggerConfig = new DocumentBuilder()
+      .setTitle('Fraiche Tizimin API')
+      .setDescription('Catalogo, clientes, carrito, ordenes, pagos, envios y operacion administrativa.')
+      .setVersion('1.0')
+      .build();
+    SwaggerModule.setup('docs', app, SwaggerModule.createDocument(app, swaggerConfig));
+  }
 
   app.enableShutdownHooks();
 

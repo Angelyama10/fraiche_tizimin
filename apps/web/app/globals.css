@@ -272,6 +272,15 @@ h3 {
   background: rgba(251, 250, 246, 0.86);
   -webkit-backdrop-filter: blur(20px) saturate(150%);
   backdrop-filter: blur(20px) saturate(150%);
+  transition: background 260ms ease, border-color 260ms ease, box-shadow 260ms ease;
+}
+
+.siteHeader.isScrolled {
+  border-color: rgba(20, 35, 31, 0.13);
+  background: rgba(251, 250, 246, 0.72);
+  box-shadow: 0 12px 36px rgba(13, 46, 40, 0.08);
+  -webkit-backdrop-filter: blur(28px) saturate(175%);
+  backdrop-filter: blur(28px) saturate(175%);
 }
 
 .siteHeader__inner {
@@ -330,8 +339,75 @@ h3 {
   text-transform: uppercase;
 }
 
+.brandIdentityLink {
+  display: inline-flex;
+  width: max-content;
+  min-width: 0;
+}
+
+.brandIdentity {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  color: var(--ink);
+  gap: 9px;
+}
+
+.brandIdentity__emblem {
+  display: grid;
+  width: 48px;
+  height: 48px;
+  flex: 0 0 48px;
+  place-items: center;
+}
+
+.brandIdentity__emblem img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  filter: drop-shadow(0 4px 7px rgba(99, 66, 12, 0.16));
+}
+
+.brandIdentity__name {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  line-height: 0.9;
+}
+
+.brandIdentity__name strong {
+  font-family: var(--font-display), var(--font-display-fallback);
+  font-size: 21px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.brandIdentity__name small {
+  margin-top: 5px;
+  color: var(--ink-soft);
+  font-size: 7px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.brandIdentity--compact .brandIdentity__emblem {
+  width: 38px;
+  height: 38px;
+  flex-basis: 38px;
+}
+
+.brandIdentity--compact .brandIdentity__name strong { font-size: 18px; }
+.brandIdentity--compact .brandIdentity__name small { font-size: 6px; }
+
+.brandIdentity--inverted { color: var(--white); }
+.brandIdentity--inverted .brandIdentity__name small { color: rgba(255, 255, 255, 0.6); }
+
 .desktopNav {
   display: none;
+}
+
+.desktopNav__feature {
+  position: relative;
 }
 
 .headerActions {
@@ -1106,6 +1182,24 @@ h3 {
   grid-column: 1 / -1;
 }
 
+.siteFooter__brand .brandIdentity {
+  color: var(--white);
+  gap: 9px;
+}
+
+.siteFooter__brand .brandIdentity__emblem {
+  display: grid;
+  color: inherit;
+}
+
+.siteFooter__brand .brandIdentity__name {
+  display: flex;
+  align-items: flex-start;
+  color: inherit;
+  flex-direction: column;
+  gap: 0;
+}
+
 .siteFooter__brand h2 {
   max-width: 390px;
   margin: 20px 0 12px;
@@ -1194,10 +1288,19 @@ h3 {
   background: var(--emerald);
   box-shadow: 0 12px 28px rgba(13, 79, 67, 0.28);
   color: var(--white);
+  transition: opacity 180ms ease, transform 180ms ease;
 }
 
 .whatsappButton span {
   display: none;
+}
+
+@media (max-width: 699px) {
+  .whatsappButton.isOverHero {
+    opacity: 0;
+    pointer-events: none;
+    transform: translateY(8px);
+  }
 }
 
 .toastViewport {
@@ -1512,7 +1615,7 @@ h3 {
   }
 
   .siteHeader__inner {
-    grid-template-columns: 190px 1fr auto;
+    grid-template-columns: 220px 1fr auto;
   }
 
   .siteHeader__menuButton {
@@ -1605,18 +1708,40 @@ h3 {
   }
 
   .desktopNav__feature {
+    position: relative;
     display: flex;
     min-height: 185px;
     justify-content: flex-end;
+    overflow: hidden;
     padding: 20px;
     border-radius: 5px;
     background: var(--mint);
+    color: var(--white);
     flex-direction: column;
+  }
+
+  .desktopNav__feature::after {
+    position: absolute;
+    background: linear-gradient(180deg, rgba(8, 31, 26, 0.1), rgba(8, 31, 26, 0.84));
+    content: '';
+    inset: 0;
+  }
+
+  .desktopNav__feature > img {
+    object-fit: cover;
+  }
+
+  .desktopNav__feature > span,
+  .desktopNav__feature > strong,
+  .desktopNav__feature > p,
+  .desktopNav__feature > small {
+    position: relative;
+    z-index: 1;
   }
 
   .desktopNav__feature > span {
     margin-bottom: auto;
-    color: var(--emerald-bright);
+    color: rgba(255, 255, 255, 0.82);
     font-size: 9px;
     font-weight: 900;
     text-transform: uppercase;
@@ -1626,6 +1751,14 @@ h3 {
     max-width: 220px;
     font-size: 25px !important;
     line-height: 0.98;
+  }
+
+  .desktopNav__feature p {
+    max-width: 230px;
+    margin: 7px 0;
+    color: rgba(255, 255, 255, 0.78);
+    font-size: 9px;
+    line-height: 1.45;
   }
 
   .productGrid {
