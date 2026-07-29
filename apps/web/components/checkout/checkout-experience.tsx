@@ -21,19 +21,27 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { apiRequest, errorMessage } from '@/lib/api';
-import { lineFallbackImage } from '@/lib/catalog';
 import { formatMoney } from '@/lib/format';
 import type { CustomerAddress, Order } from '@/lib/types';
 import { useAuth } from '@/providers/auth-provider';
 import { useCart } from '@/providers/cart-provider';
 import { useNotify } from '@/providers/notification-provider';
+import {
+  BankTransferDetails,
+  type PaymentInstruction,
+} from '@/components/payments/bank-transfer-details';
+import { ProductMediaPlaceholder } from '@/components/store/product-media-placeholder';
 
 type PaymentMethod = 'CARD' | 'PAYMENT_LINK' | 'BANK_TRANSFER' | 'CASH';
 type PaymentProvider = 'MERCADO_PAGO' | 'STRIPE';
 type DeliveryMethod = 'SHIPPING' | 'LOCAL_DELIVERY' | 'STORE_PICKUP';
-type Instruction = { title: string; instructions: string; accountData?: Record<string, unknown> | null };
 type GatewayConfiguration = {
-  mercadoPago: { enabled: boolean; publicKey: string | null };
+  mercadoPago: {
+    enabled: boolean;
+    cardEnabled: boolean;
+    linkEnabled: boolean;
+    publicKey: string | null;
+  };
   stripe: { enabled: boolean; publishableKey: string | null };
 };
 
@@ -59,7 +67,7 @@ export function CheckoutExperience() {
     useState<GatewayConfiguration | null>(null);
   const [promotionCode, setPromotionCode] = useState('');
   const [customerNotes, setCustomerNotes] = useState('');
-  const [instruction, setInstruction] = useState<Instruction | null>(null);
+  const [instruction, setInstruction] = useState<PaymentInstruction | null>(null);
   const [placing, setPlacing] = useState(false);
   const [completedOrder, setCompletedOrder] = useState<Order | null>(null);
   const [paymentError, setPaymentError] = useState<string | null>(null);
@@ -79,7 +87,7 @@ export function CheckoutExperience() {
       setInstruction(null);
       return;
     }
-    void apiRequest<Instruction>(`/payments/instructions/${paymentMethod}`, { cache: 'no-store' }).then(setInstruction).catch(() => setInstruction(null));
+    void apiRequest<PaymentInstruction>(`/payments/instructions/${paymentMethod}`, { cache: 'no-store' }).then(setInstruction).catch(() => setInstruction(null));
   }, [paymentMethod]);
 
   useEffect(() => {
@@ -88,7 +96,7 @@ export function CheckoutExperience() {
     })
       .then((configuration) => {
         setGatewayConfiguration(configuration);
-        if (!configuration.mercadoPago.enabled && configuration.stripe.enabled) {
+        if (!configuration.mercadoPago.cardEnabled && configuration.stripe.enabled) {
           setPaymentProvider('STRIPE');
         }
       })
@@ -100,10 +108,13 @@ export function CheckoutExperience() {
   }, [paymentMethod]);
 
   const gatewayAvailable =
-    paymentMethod !== 'CARD' ||
-    (paymentProvider === 'MERCADO_PAGO'
-      ? gatewayConfiguration?.mercadoPago.enabled
-      : gatewayConfiguration?.stripe.enabled);
+    paymentMethod === 'CARD'
+      ? paymentProvider === 'MERCADO_PAGO'
+        ? gatewayConfiguration?.mercadoPago.cardEnabled
+        : gatewayConfiguration?.stripe.enabled
+      : paymentMethod === 'PAYMENT_LINK'
+        ? gatewayConfiguration?.mercadoPago.linkEnabled
+        : true;
   const canCheckout = useMemo(
     () => Boolean(cart?.items.length && auth.status === 'authenticated' && gatewayAvailable),
     [auth.status, cart?.items.length, gatewayAvailable],
@@ -165,6 +176,10 @@ export function CheckoutExperience() {
           setPaymentError(errorMessage(error));
         }
       }
+      if (paymentMethod === 'BANK_TRANSFER') {
+        router.push(`/pedidos/${order.publicToken}?transferencia=1`);
+        return;
+      }
       setCompletedOrder(order);
     } catch (error) {
       notify({ title: 'No pudimos crear el pedido', description: errorMessage(error), tone: 'error' });
@@ -190,7 +205,7 @@ export function CheckoutExperience() {
         <div className="checkoutMain">
           <div className="checkoutTitle"><span className="eyebrow">Finaliza tu compra</span><h1>Tu selección</h1></div>
           <section className="checkoutItems">
-            {cart.items.map((item) => <article key={item.id}><div className="checkoutItems__image"><Image alt={item.product.image?.altText ?? item.product.name} fill sizes="90px" src={item.product.image?.url ?? lineFallbackImage(item.product.line)} /></div><div><strong>{item.product.name}</strong><small>{item.variant.name}</small><div className="quantityControl quantityControl--small"><button aria-label="Restar" disabled={mutating || item.quantity <= 1} onClick={() => updateItem(item.id, item.quantity - 1)} type="button">−</button><span>{item.quantity}</span><button aria-label="Sumar" disabled={mutating || item.quantity >= item.available} onClick={() => updateItem(item.id, item.quantity + 1)} type="button">+</button></div></div><div><strong>{formatMoney(item.lineTotalCents, item.currency)}</strong><button onClick={() => removeItem(item.id)} type="button">Quitar</button></div></article>)}
+            {cart.items.map((item) => <article key={item.id}><div className="checkoutItems__image">{item.product.image?.url ? <Image alt={item.product.image.altText || item.product.name} fill sizes="90px" src={item.product.image.url} /> : <ProductMediaPlaceholder compact name={item.product.name} />}</div><div><strong>{item.product.name}</strong><small>{item.variant.name}</small><div className="quantityControl quantityControl--small"><button aria-label="Restar" disabled={mutating || item.quantity <= 1} onClick={() => updateItem(item.id, item.quantity - 1)} type="button">−</button><span>{item.quantity}</span><button aria-label="Sumar" disabled={mutating || item.quantity >= item.available} onClick={() => updateItem(item.id, item.quantity + 1)} type="button">+</button></div></div><div><strong>{formatMoney(item.lineTotalCents, item.currency)}</strong><button onClick={() => removeItem(item.id)} type="button">Quitar</button></div></article>)}
           </section>
 
           {auth.status !== 'authenticated' ? (
@@ -215,12 +230,12 @@ export function CheckoutExperience() {
 
               <section className="checkoutSection">
                 <div className="checkoutSection__heading"><span>02</span><div><h2>Elige cómo pagar</h2><p>Los datos de tarjeta nunca pasan por nuestros servidores.</p></div></div>
-                <div className="choiceGrid choiceGrid--payments">{payments.map((payment) => <Choice active={paymentMethod === payment.id} icon={payment.icon} key={payment.id} label={payment.title} note={payment.note} onClick={() => setPaymentMethod(payment.id)} />)}</div>
+                <div className="choiceGrid choiceGrid--payments">{payments.map((payment) => <Choice active={paymentMethod === payment.id} disabled={payment.id === 'PAYMENT_LINK' && (gatewayConfiguration ? !gatewayConfiguration.mercadoPago.linkEnabled : true)} icon={payment.icon} key={payment.id} label={payment.title} note={payment.id === 'PAYMENT_LINK' && gatewayConfiguration && !gatewayConfiguration.mercadoPago.linkEnabled ? 'Temporalmente no disponible' : payment.note} onClick={() => setPaymentMethod(payment.id)} />)}</div>
                 {paymentMethod === 'CARD' && (
                   <div className="gatewayPicker" aria-label="Pasarela para tarjeta">
                     <button
                       className={paymentProvider === 'MERCADO_PAGO' ? 'isActive' : ''}
-                      disabled={gatewayConfiguration ? !gatewayConfiguration.mercadoPago.enabled : true}
+                      disabled={gatewayConfiguration ? !gatewayConfiguration.mercadoPago.cardEnabled : true}
                       onClick={() => setPaymentProvider('MERCADO_PAGO')}
                       type="button"
                     >
@@ -239,13 +254,13 @@ export function CheckoutExperience() {
                       {paymentProvider === 'STRIPE' && <Check size={15} />}
                     </button>
                     {gatewayConfiguration &&
-                      !gatewayConfiguration.mercadoPago.enabled &&
+                      !gatewayConfiguration.mercadoPago.cardEnabled &&
                       !gatewayConfiguration.stripe.enabled && (
                         <p>La tienda está terminando de configurar el pago con tarjeta.</p>
                       )}
                   </div>
                 )}
-                {instruction && <div className="paymentInstruction"><Landmark aria-hidden="true" size={18} /><div><strong>{instruction.title}</strong><p>{instruction.instructions}</p></div></div>}
+                {instruction && <div className="paymentInstruction"><Landmark aria-hidden="true" size={18} /><div><strong>{instruction.title}</strong>{paymentMethod === 'BANK_TRANSFER' ? <BankTransferDetails instruction={instruction} /> : <p>{instruction.instructions}</p>}</div></div>}
               </section>
 
               <section className="checkoutSection">
@@ -279,6 +294,52 @@ function InlineAddressFields({ customerName, phone }: { customerName: string; ph
   return <div className="inlineAddress"><div className="formGrid"><label className="formField"><span>Recibe</span><input defaultValue={customerName} name="recipientName" required /></label><label className="formField"><span>WhatsApp</span><input defaultValue={phone} maxLength={30} name="phone" required /></label></div><div className="formGrid formGrid--street"><label className="formField"><span>Calle</span><input maxLength={160} name="street" required /></label><label className="formField"><span>Exterior</span><input maxLength={20} name="exteriorNumber" required /></label><label className="formField"><span>Interior</span><input maxLength={20} name="interiorNumber" /></label></div><label className="formField"><span>Colonia</span><input maxLength={100} name="neighborhood" required /></label><div className="formGrid"><label className="formField"><span>Ciudad</span><input defaultValue="Tizimín" maxLength={100} name="city" required /></label><label className="formField"><span>Municipio</span><input defaultValue="Tizimín" maxLength={100} name="municipality" /></label></div><div className="formGrid"><label className="formField"><span>Estado</span><input defaultValue="Yucatán" maxLength={100} name="state" required /></label><label className="formField"><span>Código postal</span><input inputMode="numeric" maxLength={10} name="postalCode" required /></label></div><label className="formField"><span>Referencia</span><input maxLength={300} name="reference" /></label></div>;
 }
 
-function CheckoutComplete({ order, paymentError, instruction }: { order: Order; paymentError: string | null; instruction: Instruction | null }) {
-  return <main className="checkoutComplete pageWidth"><span className="checkoutComplete__icon"><CheckCircle2 aria-hidden="true" size={34} /></span><span className="eyebrow">Pedido {order.number}</span><h1>Tu pedido ya está con nosotros.</h1><p>{order.paymentMethod === 'BANK_TRANSFER' ? instruction?.instructions ?? 'Realiza tu transferencia y sube el comprobante desde el seguimiento.' : order.paymentMethod === 'CASH' ? 'Te avisaremos cuando esté listo para recoger y pagar en tienda.' : paymentError ? 'La orden quedó guardada, pero no pudimos abrir la pasarela de pago.' : 'Te llevaremos a la pasarela segura para completar el pago.'}</p>{paymentError && <div className="checkoutComplete__warning"><LockKeyhole size={17} /><span><strong>Pasarela pendiente de configuración</strong>{paymentError}</span></div>}<div className="checkoutComplete__summary"><span>Total</span><strong>{formatMoney(order.totalCents, order.currency)}</strong></div><div className="checkoutComplete__actions"><Link className="button button--dark button--large" href={`/pedidos/${order.publicToken}`}>Ver pedido y seguimiento <ArrowRight size={18} /></Link><Link className="button button--outline button--large" href="/productos">Seguir comprando</Link></div></main>;
+function CheckoutComplete({ order, paymentError, instruction }: { order: Order; paymentError: string | null; instruction: PaymentInstruction | null }) {
+  return (
+    <main className="checkoutComplete pageWidth">
+      <span className="checkoutComplete__icon">
+        <CheckCircle2 aria-hidden="true" size={34} />
+      </span>
+      <span className="eyebrow">Pedido {order.number}</span>
+      <h1>Tu pedido ya está con nosotros.</h1>
+      <p>
+        {order.paymentMethod === 'BANK_TRANSFER'
+          ? instruction?.instructions ??
+            'Realiza tu transferencia y sube el comprobante desde el seguimiento.'
+          : order.paymentMethod === 'CASH'
+            ? 'Te avisaremos cuando esté listo para recoger y pagar en tienda.'
+            : paymentError
+              ? 'La orden quedó guardada, pero no pudimos abrir la pasarela de pago.'
+              : 'Te llevaremos a la pasarela segura para completar el pago.'}
+      </p>
+      {paymentError && (
+        <div className="checkoutComplete__warning">
+          <LockKeyhole aria-hidden="true" size={17} />
+          <span>
+            <strong>Pasarela pendiente de configuración</strong>
+            {paymentError}
+          </span>
+        </div>
+      )}
+      <div className="checkoutComplete__summary">
+        <span>Total</span>
+        <strong>{formatMoney(order.totalCents, order.currency)}</strong>
+      </div>
+      <p className="checkoutComplete__policy">
+        Consulta tiempos, formas de entrega y cambios en{' '}
+        <Link href="/envios-y-devoluciones">Envíos y devoluciones</Link>.
+      </p>
+      <div className="checkoutComplete__actions">
+        <Link
+          className="button button--dark button--large"
+          href={`/pedidos/${order.publicToken}`}
+        >
+          Ver pedido y seguimiento <ArrowRight aria-hidden="true" size={18} />
+        </Link>
+        <Link className="button button--outline button--large" href="/productos">
+          Seguir comprando
+        </Link>
+      </div>
+    </main>
+  );
 }

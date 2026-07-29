@@ -1,7 +1,9 @@
 import { Camera, Mail, MapPin, MessageCircle, MessagesSquare, Phone } from 'lucide-react';
 import Link from 'next/link';
 import type { SiteContentDocument } from '@/lib/site-content';
+import { isConfiguredSocialUrl } from '@/lib/seo';
 import { BrandIdentity } from './brand-identity';
+import { CookiePreferencesButton } from './cookie-preferences-button';
 
 export function SiteFooter({ content }: { content: SiteContentDocument['global'] }) {
   const { contact, footer, header } = content;
@@ -21,13 +23,18 @@ export function SiteFooter({ content }: { content: SiteContentDocument['global']
           <Link href="/productos?line=PREMIUM">Premium</Link>
           <Link href="/promociones">Promociones</Link>
           <Link href="/pedidos-especiales">Pedir un aroma</Link>
+          <Link href="/guia-de-perfumes">Guía de perfumes</Link>
         </div>
         <div>
           <h3>Tu compra</h3>
           <Link href="/cuenta">Mi cuenta</Link>
-          <Link href="/cuenta?tab=pedidos">Mis pedidos</Link>
+          <Link href="/cuenta?tab=pedidos">Mis compras</Link>
           <Link href="/carrito">Carrito</Link>
+          <Link href="/envios-y-devoluciones">Envíos y devoluciones</Link>
+          <Link href="/terminos">Términos</Link>
           <Link href="/privacidad">Privacidad</Link>
+          <Link href="/cookies">Cookies</Link>
+          {process.env.NEXT_PUBLIC_GA_MEASUREMENT_ID && <CookiePreferencesButton />}
         </div>
         <div>
           <h3>Estamos cerca</h3>
@@ -40,8 +47,8 @@ export function SiteFooter({ content }: { content: SiteContentDocument['global']
       <div className="siteFooter__bottom pageWidth">
         <p>© {new Date().getFullYear()} KI&apos;IBOK Exclusivo</p>
         <div>
-          <a aria-label="Instagram" href={contact.instagramUrl} rel="noreferrer" target="_blank" title="Instagram"><Camera aria-hidden="true" size={18} /></a>
-          <a aria-label="Facebook" href={contact.facebookUrl} rel="noreferrer" target="_blank" title="Facebook"><MessagesSquare aria-hidden="true" size={18} /></a>
+          {isConfiguredSocialUrl(contact.instagramUrl) && <a aria-label="Instagram de KI'IBOK Exclusivo" href={contact.instagramUrl} rel="noreferrer" target="_blank" title="Instagram"><Camera aria-hidden="true" size={18} /></a>}
+          {isConfiguredSocialUrl(contact.facebookUrl) && <a aria-label="Facebook de KI'IBOK Exclusivo" href={contact.facebookUrl} rel="noreferrer" target="_blank" title="Facebook"><MessagesSquare aria-hidden="true" size={18} /></a>}
         </div>
         <p>Compra segura · Pagos protegidos</p>
       </div>

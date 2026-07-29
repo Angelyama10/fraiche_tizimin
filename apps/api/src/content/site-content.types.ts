@@ -15,6 +15,10 @@ export type StorefrontLink = {
   href: string;
 };
 
+export type StorefrontScentLink = StorefrontLink & {
+  id: string;
+};
+
 export type StorefrontNavigationItem = StorefrontLink & {
   id: string;
   kind: 'LINK' | 'PERFUME_MENU';
@@ -31,6 +35,7 @@ export type StorefrontSection = {
   imageUrl: string;
   ctaLabel: string;
   ctaHref: string;
+  scentLinks: StorefrontScentLink[];
 };
 
 export type SiteContentDocument = {

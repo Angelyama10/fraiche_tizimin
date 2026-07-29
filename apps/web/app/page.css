@@ -92,7 +92,7 @@
   margin-top: 12px;
   color: var(--emerald);
   font-family: var(--font-body), var(--font-body-fallback);
-  font-size: 12px;
+  font-size: 15px;
   font-weight: 800;
   text-transform: uppercase;
 }
@@ -109,7 +109,7 @@
   max-width: 380px;
   margin-bottom: 24px;
   color: var(--ink-soft);
-  font-size: 12px;
+  font-size: 15px;
 }
 
 .homeHero__actions {

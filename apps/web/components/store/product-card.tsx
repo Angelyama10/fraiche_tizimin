@@ -13,6 +13,7 @@ import type { Product } from '@/lib/types';
 import { useAuth } from '@/providers/auth-provider';
 import { useCart } from '@/providers/cart-provider';
 import { useNotify } from '@/providers/notification-provider';
+import { ProductMediaPlaceholder } from './product-media-placeholder';
 
 export function ProductCard({ product, priority = false }: { product: Product; priority?: boolean }) {
   const [liked, setLiked] = useState(false);
@@ -25,7 +26,7 @@ export function ProductCard({ product, priority = false }: { product: Product; p
   const pathname = usePathname();
   const variant = product.variants.find((item) => item.inStock) ?? product.variants[0];
   const image = productImage(product);
-  const external = image.startsWith('http');
+  const external = image?.startsWith('http') ?? false;
 
   async function addToCart() {
     if (!variant?.inStock) return;
@@ -59,15 +60,17 @@ export function ProductCard({ product, priority = false }: { product: Product; p
     <motion.article className="productCard" initial={{ opacity: 0, y: 18 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true, amount: 0.15 }}>
       <div className="productCard__media">
         <Link href={`/productos/${product.slug}`} aria-label={`Ver ${product.name}`}>
-          <Image
-            alt={productImageAlt(product)}
-            fetchPriority={priority ? 'high' : 'auto'}
-            fill
-            loading={priority ? 'eager' : 'lazy'}
-            sizes="(max-width: 600px) 78vw, (max-width: 1100px) 42vw, 310px"
-            src={image}
-            unoptimized={external}
-          />
+          {image ? (
+            <Image
+              alt={productImageAlt(product)}
+              fetchPriority={priority ? 'high' : 'auto'}
+              fill
+              loading={priority ? 'eager' : 'lazy'}
+              sizes="(max-width: 600px) 78vw, (max-width: 1100px) 42vw, 310px"
+              src={image}
+              unoptimized={external}
+            />
+          ) : <ProductMediaPlaceholder name={product.name} />}
         </Link>
         <div className="productCard__badges">
           {product.isNew && <span>Nuevo</span>}
@@ -111,7 +114,7 @@ export function ProductCard({ product, priority = false }: { product: Product; p
           </button>
         </div>
         <Link className="productCard__view" href={`/productos/${product.slug}`}>
-          Ver notas y detalles <ArrowUpRight aria-hidden="true" size={15} />
+          Detalles de {product.name} <ArrowUpRight aria-hidden="true" size={15} />
         </Link>
       </div>
     </motion.article>

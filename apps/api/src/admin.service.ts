@@ -1,5 +1,11 @@
 import { BadRequestException, ConflictException, Injectable, NotFoundException } from '@nestjs/common';
-import { PricingMode, Prisma, ProductLine, StockMovementType } from '@prisma/client';
+import {
+  PricingMode,
+  Prisma,
+  ProductLine,
+  ProductStatus,
+  StockMovementType,
+} from '@prisma/client';
 import {
   CreateProductDto,
   CreateProductVariantDto,
@@ -49,7 +55,10 @@ export class AdminService {
             name: input.name.trim(),
             shortDescription: input.shortDescription?.trim(),
             description: input.description?.trim(),
+            seoTitle: input.seoTitle?.trim(),
+            seoDescription: input.seoDescription?.trim(),
             line: input.line,
+            status: input.status ?? ProductStatus.DRAFT,
             brandId: brand?.id,
             isFeatured: input.isFeatured ?? false,
             isNew: input.isNew ?? false,
@@ -129,10 +138,108 @@ export class AdminService {
   }
 
   async updateProduct(id: string, input: UpdateProductDto, actorId: string) {
-    const before = await this.prisma.product.findUnique({ where: { id } });
+    const before = await this.prisma.product.findUnique({
+      where: { id },
+      include: {
+        images: { orderBy: { sortOrder: 'asc' } },
+        categories: true,
+        scentFamilies: true,
+      },
+    });
     if (!before) throw new NotFoundException('Producto no encontrado.');
+
+    const categorySlugs = input.categorySlugs
+      ? [...new Set(input.categorySlugs)]
+      : undefined;
+    const categories = categorySlugs
+      ? await this.prisma.category.findMany({
+          where: { slug: { in: categorySlugs }, isActive: true },
+        })
+      : undefined;
+    if (categories && categories.length !== categorySlugs?.length) {
+      throw new BadRequestException('Una o más categorías no existen.');
+    }
+
+    const scentSlugs = input.scentSlugs
+      ? [...new Set(input.scentSlugs)]
+      : undefined;
+    const scentFamilies = scentSlugs
+      ? await this.prisma.scentFamily.findMany({
+          where: { slug: { in: scentSlugs } },
+        })
+      : undefined;
+    if (scentFamilies && scentFamilies.length !== scentSlugs?.length) {
+      throw new BadRequestException('Una o más familias aromáticas no existen.');
+    }
+
+    const {
+      categorySlugs: _categorySlugs,
+      scentSlugs: _scentSlugs,
+      images,
+      ...productFields
+    } = input;
+    const normalizedProductFields = {
+      ...productFields,
+      ...(input.name !== undefined ? { name: input.name.trim() } : {}),
+      ...(input.shortDescription !== undefined
+        ? { shortDescription: input.shortDescription.trim() || null }
+        : {}),
+      ...(input.description !== undefined
+        ? { description: input.description.trim() || null }
+        : {}),
+      ...(input.seoTitle !== undefined
+        ? { seoTitle: input.seoTitle?.trim() || null }
+        : {}),
+      ...(input.seoDescription !== undefined
+        ? { seoDescription: input.seoDescription?.trim() || null }
+        : {}),
+    };
     return this.prisma.$transaction(async (transaction) => {
-      const product = await transaction.product.update({ where: { id }, data: input });
+      const product = await transaction.product.update({
+        where: { id },
+        data: {
+          ...normalizedProductFields,
+          ...(categories
+            ? {
+                categories: {
+                  deleteMany: {},
+                  create: categories.map((category) => ({
+                    categoryId: category.id,
+                  })),
+                },
+              }
+            : {}),
+          ...(scentFamilies
+            ? {
+                scentFamilies: {
+                  deleteMany: {},
+                  create: scentFamilies.map((scentFamily) => ({
+                    scentFamilyId: scentFamily.id,
+                  })),
+                },
+              }
+            : {}),
+          ...(images
+            ? {
+                images: {
+                  deleteMany: {},
+                  create: images.map((image, index) => ({
+                    url: image.url,
+                    altText: image.altText,
+                    isPrimary:
+                      image.isPrimary ?? (!images.some((item) => item.isPrimary) && index === 0),
+                    sortOrder: index,
+                  })),
+                },
+              }
+            : {}),
+        },
+        include: {
+          images: { orderBy: { sortOrder: 'asc' } },
+          categories: { include: { category: true } },
+          scentFamilies: { include: { scentFamily: true } },
+        },
+      });
       await transaction.auditLog.create({
         data: {
           actorId,

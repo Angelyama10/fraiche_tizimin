@@ -26,7 +26,10 @@ test('las promociones publicas ocultan campañas futuras por defecto', () => {
   harness.service.promotions();
 
   assert.ok('startsAt' in harness.query().where);
-  assert.ok('endsAt' in harness.query().where);
+  const validity = harness.query().where.OR;
+  assert.ok(Array.isArray(validity));
+  assert.deepEqual(validity[0], { endsAt: null });
+  assert.ok(validity[1].endsAt.gte instanceof Date);
 });
 
 test('el escaparate puede solicitar campañas próximas sin incluir campañas vencidas', () => {
@@ -35,6 +38,6 @@ test('el escaparate puede solicitar campañas próximas sin incluir campañas ve
   harness.service.promotions(true);
 
   assert.equal('startsAt' in harness.query().where, false);
-  assert.ok('endsAt' in harness.query().where);
+  assert.ok('OR' in harness.query().where);
   assert.equal(harness.query().where.isActive, true);
 });

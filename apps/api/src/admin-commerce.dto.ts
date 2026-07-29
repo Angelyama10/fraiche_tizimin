@@ -262,8 +262,9 @@ export class CreatePromotionDto {
   @IsDateString()
   startsAt!: string;
 
+  @IsOptional()
   @IsDateString()
-  endsAt!: string;
+  endsAt?: string | null;
 
   @IsOptional()
   @IsBoolean()

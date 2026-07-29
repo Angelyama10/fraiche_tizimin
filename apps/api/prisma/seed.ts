@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { PrismaPg } from '@prisma/adapter-pg';
 import {
   PaymentMethod,
@@ -8,22 +10,26 @@ import {
   ProductStatus,
   PromotionPlacement,
   PromotionType,
+  StockMovementType,
 } from '@prisma/client';
-import { Pool } from 'pg';
 import { hash } from 'bcrypt';
+import { Pool } from 'pg';
 import { DEFAULT_SITE_CONTENT } from '../src/content/site-content.defaults';
 
-const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  max: Number(process.env.DB_POOL_MAX ?? 10),
+});
 const prisma = new PrismaClient({ adapter: new PrismaPg(pool) });
 
-type SeedProduct = {
+type InventoryCatalogEntry = {
   slug: string;
   name: string;
   shortDescription: string;
   description: string;
   line: ProductLine;
   brandSlug: string;
-  categorySlug: string;
+  categorySlugs: string[];
   scentSlugs: string[];
   sku: string;
   variantName: string;
@@ -32,96 +38,422 @@ type SeedProduct = {
   volumeMl?: number;
   catalogPriceCents?: number;
   stock: number;
-  isFeatured?: boolean;
-  isNew?: boolean;
+  attributes: Record<string, unknown>;
+  variantAttributes: Record<string, unknown>;
 };
 
-async function upsertCategory(slug: string, name: string, parentId?: string) {
-  return prisma.category.upsert({
-    where: { slug },
-    update: {},
-    create: { slug, name, parentId, isActive: true },
-  });
+type CategorySeed = {
+  slug: string;
+  name: string;
+  description: string;
+  parentSlug?: string;
+  sortOrder: number;
+};
+
+const categorySeeds: CategorySeed[] = [
+  {
+    slug: 'perfumes',
+    name: 'Perfumes',
+    description: 'Fragancias de diseñador, Neeche Passion y líneas Premium.',
+    sortOrder: 10,
+  },
+  {
+    slug: 'disenador-clasico',
+    name: 'Perfumes Diseñador - Línea Fraiche',
+    description: 'Presentación de 60 ml con concentración clásica al 33%.',
+    parentSlug: 'perfumes',
+    sortOrder: 10,
+  },
+  {
+    slug: 'disenador-37',
+    name: 'Perfumes Diseñador 37%',
+    description: 'Presentación de 60 ml con 37% de esencia para mayor intensidad.',
+    parentSlug: 'perfumes',
+    sortOrder: 20,
+  },
+  {
+    slug: 'neeche-passion',
+    name: 'Neeche Passion',
+    description: 'Fragancias de 60 ml con concentración clásica y precio fijo de $350 MXN.',
+    parentSlug: 'perfumes',
+    sortOrder: 30,
+  },
+  {
+    slug: 'premium',
+    name: 'Premium Nicho y Árabes',
+    description: 'Fragancias Premium de 60 ml al 37% y precio fijo de $380 MXN.',
+    parentSlug: 'perfumes',
+    sortOrder: 40,
+  },
+  {
+    slug: 'cuidado-personal',
+    name: 'Cuidado Personal',
+    description:
+      'Productos para la higiene, belleza y cuidado diario de la piel y el cuerpo. Aquí encontrarás hidratación, limpieza facial, protección solar, maquillaje y tratamientos para complementar tu rutina de forma práctica y organizada.',
+    sortOrder: 20,
+  },
+  {
+    slug: 'cremas-corporales',
+    name: 'Cremas corporales',
+    description: 'Productos para hidratar, nutrir y suavizar la piel.',
+    parentSlug: 'cuidado-personal',
+    sortOrder: 10,
+  },
+  {
+    slug: 'body-mist',
+    name: 'Body Mist',
+    description: 'Brumas corporales con fragancias ligeras para brindar frescura durante el día.',
+    parentSlug: 'cuidado-personal',
+    sortOrder: 20,
+  },
+  {
+    slug: 'protectores-solares',
+    name: 'Protectores solares',
+    description: 'Productos que ayudan a proteger la piel de los efectos de la radiación solar.',
+    parentSlug: 'cuidado-personal',
+    sortOrder: 30,
+  },
+  {
+    slug: 'agua-micelar',
+    name: 'Agua micelar',
+    description:
+      'Limpieza facial para retirar maquillaje, impurezas y exceso de grasa sin necesidad de enjuagar.',
+    parentSlug: 'cuidado-personal',
+    sortOrder: 40,
+  },
+  {
+    slug: 'maquillaje',
+    name: 'Maquillaje',
+    description: 'Delineadores, máscaras de pestañas, labiales y otros artículos de belleza.',
+    parentSlug: 'cuidado-personal',
+    sortOrder: 50,
+  },
+  {
+    slug: 'serums',
+    name: 'Sérums',
+    description:
+      'Tratamientos faciales concentrados para hidratar, nutrir y mejorar la apariencia de la piel.',
+    parentSlug: 'cuidado-personal',
+    sortOrder: 60,
+  },
+  {
+    slug: 'desmaquillantes',
+    name: 'Desmaquillantes',
+    description: 'Productos para retirar maquillaje y limpiar suavemente el rostro.',
+    parentSlug: 'cuidado-personal',
+    sortOrder: 70,
+  },
+  {
+    slug: 'exfoliantes',
+    name: 'Exfoliantes',
+    description: 'Cuidado facial y corporal para retirar células muertas y renovar la piel.',
+    parentSlug: 'cuidado-personal',
+    sortOrder: 80,
+  },
+  {
+    slug: 'tonicos',
+    name: 'Tónicos',
+    description: 'Productos para complementar la limpieza y preparar la piel.',
+    parentSlug: 'cuidado-personal',
+    sortOrder: 90,
+  },
+  {
+    slug: 'balsamos-labiales',
+    name: 'Bálsamos labiales',
+    description: 'Hidratación y protección para los labios.',
+    parentSlug: 'cuidado-personal',
+    sortOrder: 100,
+  },
+  {
+    slug: 'aceites-corporales',
+    name: 'Aceites corporales',
+    description: 'Aceites para nutrir la piel y complementar el cuidado corporal.',
+    parentSlug: 'cuidado-personal',
+    sortOrder: 110,
+  },
+  {
+    slug: 'desodorantes',
+    name: 'Desodorantes',
+    description: 'Opciones para mujer, hombre y presentaciones unisex.',
+    parentSlug: 'cuidado-personal',
+    sortOrder: 120,
+  },
+  {
+    slug: 'perfumes-para-cabello',
+    name: 'Perfumes para cabello',
+    description: 'Brumas ligeras creadas para perfumar el cabello.',
+    parentSlug: 'cuidado-personal',
+    sortOrder: 130,
+  },
+  {
+    slug: 'jabones-corporales',
+    name: 'Jabones corporales',
+    description: 'Jabones naturales, artesanales y kits para el cuidado diario.',
+    parentSlug: 'cuidado-personal',
+    sortOrder: 140,
+  },
+  {
+    slug: 'colonias-infantiles',
+    name: 'Colonias infantiles',
+    description: 'Aromas y aguas de colonia para niñas y niños.',
+    parentSlug: 'cuidado-personal',
+    sortOrder: 150,
+  },
+  {
+    slug: 'perfumes-de-regalo',
+    name: 'Perfumes de regalo',
+    description: 'Presentaciones decorativas y especiales para obsequiar.',
+    parentSlug: 'cuidado-personal',
+    sortOrder: 160,
+  },
+  {
+    slug: 'lociones-victorias-secret',
+    name: "Lociones Victoria's Secret",
+    description: "Body Mist y lociones corporales Victoria's Secret.",
+    parentSlug: 'cuidado-personal',
+    sortOrder: 170,
+  },
+  {
+    slug: 'lociones-arabes',
+    name: 'Lociones corporales árabes',
+    description: 'Body Mist y lociones corporales de inspiración árabe.',
+    parentSlug: 'cuidado-personal',
+    sortOrder: 180,
+  },
+  {
+    slug: 'linea-fraiche',
+    name: 'Productos de la línea Fraiche',
+    description: 'Selección de cuidado personal elaborada o distribuida por Fraiche.',
+    parentSlug: 'cuidado-personal',
+    sortOrder: 190,
+  },
+  {
+    slug: 'otros-cuidados',
+    name: 'Otros productos de cuidado personal',
+    description: 'Artículos adicionales para el cuidado facial y corporal.',
+    parentSlug: 'cuidado-personal',
+    sortOrder: 200,
+  },
+  {
+    slug: 'aromas-para-espacios',
+    name: 'Aromas para espacios',
+    description: 'Aromas para acompañar el hogar, el auto y tus espacios cotidianos.',
+    sortOrder: 30,
+  },
+  {
+    slug: 'aromatizantes-para-auto',
+    name: 'Aromatizantes para auto',
+    description: 'Aromas concentrados para mantener fresco el interior del automóvil.',
+    parentSlug: 'aromas-para-espacios',
+    sortOrder: 10,
+  },
+  {
+    slug: 'velas-aromaticas',
+    name: 'Velas aromáticas',
+    description: 'Velas decorativas con aroma para el hogar.',
+    parentSlug: 'aromas-para-espacios',
+    sortOrder: 20,
+  },
+];
+
+function loadInventoryCatalog() {
+  const path = resolve(__dirname, 'data/inventory-2.0.json');
+  const parsed = JSON.parse(readFileSync(path, 'utf8')) as InventoryCatalogEntry[];
+  if (!Array.isArray(parsed) || parsed.length !== 872) {
+    throw new Error('El catálogo normalizado debe contener exactamente 872 productos.');
+  }
+  return parsed;
 }
 
-async function seedProduct(productData: SeedProduct, locationId: string) {
-  const brand = await prisma.brand.findUniqueOrThrow({
-    where: { slug: productData.brandSlug },
-  });
-  const category = await prisma.category.findUniqueOrThrow({
-    where: { slug: productData.categorySlug },
-  });
+function normalizeDisplayName(value: string) {
+  const normalized = value.trim().replace(/\s+/g, ' ');
+  if (!normalized) return normalized;
+  return normalized[0].toLocaleUpperCase('es-MX') + normalized.slice(1);
+}
+
+function normalizeVariantName(value: string) {
+  return value
+    .trim()
+    .replace(/\s+/g, ' ')
+    .replace(/(\d+(?:[.,]\d+)?)\s*ml\b/gi, '$1 ml')
+    .replace(/(\d+(?:[.,]\d+)?)\s*mg\b/gi, '$1 mg')
+    .replace(/(\d+(?:[.,]\d+)?)\s*(?:gr|g)\b/gi, '$1 g');
+}
+
+function normalizeProductCopy(value: string) {
+  return value
+    .trim()
+    .replace(/[ \t]+/g, ' ')
+    .replace(/(\d+(?:[.,]\d+)?)\s*ml\b/gi, '$1 ml')
+    .replace(/(\d+(?:[.,]\d+)?)\s*mg\b/gi, '$1 mg')
+    .replace(/(\d+(?:[.,]\d+)?)\s*(?:gr|g)\b/gi, '$1 g');
+}
+
+async function seedCategories() {
+  const categoryIds = new Map<string, string>();
+  for (const seed of categorySeeds.filter((entry) => !entry.parentSlug)) {
+    const category = await prisma.category.upsert({
+      where: { slug: seed.slug },
+      update: {
+        name: seed.name,
+        description: seed.description,
+        sortOrder: seed.sortOrder,
+        isActive: true,
+      },
+      create: {
+        slug: seed.slug,
+        name: seed.name,
+        description: seed.description,
+        sortOrder: seed.sortOrder,
+        isActive: true,
+      },
+    });
+    categoryIds.set(category.slug, category.id);
+  }
+
+  for (const seed of categorySeeds.filter((entry) => entry.parentSlug)) {
+    const parentId = categoryIds.get(seed.parentSlug!);
+    if (!parentId) throw new Error(`No existe la categoría padre ${seed.parentSlug}.`);
+    const category = await prisma.category.upsert({
+      where: { slug: seed.slug },
+      update: {
+        name: seed.name,
+        description: seed.description,
+        parentId,
+        sortOrder: seed.sortOrder,
+        isActive: true,
+      },
+      create: {
+        slug: seed.slug,
+        name: seed.name,
+        description: seed.description,
+        parentId,
+        sortOrder: seed.sortOrder,
+        isActive: true,
+      },
+    });
+    categoryIds.set(category.slug, category.id);
+  }
+  return categoryIds;
+}
+
+async function seedCatalogProduct(
+  entry: InventoryCatalogEntry,
+  locationId: string,
+  brandIds: Map<string, string>,
+  categoryIds: Map<string, string>,
+  scentIds: Map<string, string>,
+) {
+  const brandId = brandIds.get(entry.brandSlug);
+  if (!brandId) throw new Error(`No existe la marca ${entry.brandSlug}.`);
+  const productName = normalizeDisplayName(entry.name);
+  const variantName = normalizeVariantName(entry.variantName);
+  const shortDescription = normalizeProductCopy(entry.shortDescription);
+  const description = normalizeProductCopy(entry.description);
 
   const product = await prisma.product.upsert({
-    where: { slug: productData.slug },
-    update: {},
-    create: {
-      slug: productData.slug,
-      name: productData.name,
-      shortDescription: productData.shortDescription,
-      description: productData.description,
-      line: productData.line,
-      brandId: brand.id,
+    where: { slug: entry.slug },
+    update: {
+      name: productName,
+      shortDescription,
+      description,
+      line: entry.line,
+      brandId,
       status: ProductStatus.ACTIVE,
-      isFeatured: productData.isFeatured ?? false,
-      isNew: productData.isNew ?? false,
+      attributes: entry.attributes as Prisma.InputJsonValue,
+    },
+    create: {
+      slug: entry.slug,
+      name: productName,
+      shortDescription,
+      description,
+      line: entry.line,
+      brandId,
+      status: ProductStatus.ACTIVE,
+      attributes: entry.attributes as Prisma.InputJsonValue,
     },
   });
 
-  await prisma.productCategory.upsert({
-    where: {
-      productId_categoryId: { productId: product.id, categoryId: category.id },
-    },
-    update: {},
-    create: { productId: product.id, categoryId: category.id },
+  const productCategories = entry.categorySlugs.map((slug) => {
+    const categoryId = categoryIds.get(slug);
+    if (!categoryId) throw new Error(`No existe la categoría ${slug}.`);
+    return { productId: product.id, categoryId };
+  });
+  await prisma.productCategory.createMany({
+    data: productCategories,
+    skipDuplicates: true,
   });
 
-  for (const scentSlug of productData.scentSlugs) {
-    const scentFamily = await prisma.scentFamily.findUniqueOrThrow({
-      where: { slug: scentSlug },
-    });
-    await prisma.productScentFamily.upsert({
-      where: {
-        productId_scentFamilyId: {
-          productId: product.id,
-          scentFamilyId: scentFamily.id,
-        },
-      },
-      update: {},
-      create: { productId: product.id, scentFamilyId: scentFamily.id },
+  const productScents = entry.scentSlugs.map((slug) => {
+    const scentFamilyId = scentIds.get(slug);
+    if (!scentFamilyId) throw new Error(`No existe la familia aromática ${slug}.`);
+    return { productId: product.id, scentFamilyId };
+  });
+  if (productScents.length) {
+    await prisma.productScentFamily.createMany({
+      data: productScents,
+      skipDuplicates: true,
     });
   }
 
   const variant = await prisma.productVariant.upsert({
-    where: { sku: productData.sku },
-    update: {},
+    where: { sku: entry.sku },
+    update: {
+      productId: product.id,
+      name: variantName,
+      concentrationLabel: entry.concentrationLabel,
+      concentrationPercent: entry.concentrationPercent,
+      volumeMl: entry.volumeMl,
+      catalogPriceCents: entry.catalogPriceCents,
+      attributes: entry.variantAttributes as Prisma.InputJsonValue,
+      isActive: true,
+    },
     create: {
       productId: product.id,
-      sku: productData.sku,
-      name: productData.variantName,
-      concentrationLabel: productData.concentrationLabel,
-      concentrationPercent: productData.concentrationPercent,
-      volumeMl: productData.volumeMl,
-      catalogPriceCents: productData.catalogPriceCents,
+      sku: entry.sku,
+      name: variantName,
+      concentrationLabel: entry.concentrationLabel,
+      concentrationPercent: entry.concentrationPercent,
+      volumeMl: entry.volumeMl,
+      catalogPriceCents: entry.catalogPriceCents,
+      attributes: entry.variantAttributes as Prisma.InputJsonValue,
       isActive: true,
     },
   });
 
-  await prisma.inventoryLevel.upsert({
+  const existingInventory = await prisma.inventoryLevel.findUnique({
     where: {
       variantId_locationId: { variantId: variant.id, locationId },
     },
-    update: {},
-    create: {
-      variantId: variant.id,
-      locationId,
-      onHand: productData.stock,
-      available: productData.stock,
-      reserved: 0,
-    },
   });
-
-  return product;
+  if (!existingInventory) {
+    await prisma.$transaction([
+      prisma.inventoryLevel.create({
+        data: {
+          variantId: variant.id,
+          locationId,
+          onHand: entry.stock,
+          available: entry.stock,
+          reserved: 0,
+          lowStockThreshold: 3,
+        },
+      }),
+      ...(entry.stock > 0
+        ? [
+            prisma.stockMovement.create({
+              data: {
+                variantId: variant.id,
+                locationId,
+                type: StockMovementType.PURCHASE,
+                quantity: entry.stock,
+                referenceId: product.id,
+                reason: 'Importación inicial de INVENTARIO 2.0.xlsx',
+              },
+            }),
+          ]
+        : []),
+    ]);
+  }
 }
 
 async function main() {
@@ -164,219 +496,201 @@ async function main() {
     [ProductLine.PREMIUM, PricingMode.FIXED_BY_LINE, 38000],
     [ProductLine.PERSONAL_CARE, PricingMode.CATALOG, null],
   ] as const;
-
   for (const [line, pricingMode, fixedPriceCents] of policies) {
     await prisma.linePricingPolicy.upsert({
       where: { line },
-      update: {},
+      update: { pricingMode, fixedPriceCents, isActive: true },
       create: { line, pricingMode, fixedPriceCents, isActive: true },
     });
   }
 
+  const brandIds = new Map<string, string>();
   for (const [slug, name] of [
     ['fraiche', 'Fraiche'],
     ['neeche', 'Neeche Passion'],
     ['premium', 'Premium'],
     ['victorias-secret', "Victoria's Secret"],
-    ['arabic-care', 'Cuidado Arabe'],
+    ['arabic-care', 'Cuidado árabe'],
   ]) {
-    await prisma.brand.upsert({
+    const brand = await prisma.brand.upsert({
       where: { slug },
-      update: {},
+      update: { name },
       create: { slug, name },
     });
+    brandIds.set(brand.slug, brand.id);
   }
 
-  const perfumes = await upsertCategory('perfumes', 'Perfumes');
-  await upsertCategory('disenador-clasico', 'Perfumes Disenador - Linea Fraiche', perfumes.id);
-  await upsertCategory('disenador-37', 'Perfumes Disenador 37%', perfumes.id);
-  await upsertCategory('neeche-passion', 'Neeche Passion', perfumes.id);
-  await upsertCategory('premium', 'Premium Nicho y Arabes', perfumes.id);
-
-  const personalCare = await upsertCategory('cuidado-personal', 'Cuidado Personal');
-  await upsertCategory('cremas-corporales', 'Cremas Corporales', personalCare.id);
-  await upsertCategory('desodorantes', 'Desodorantes', personalCare.id);
-  await upsertCategory('lociones-victorias-secret', "Lociones Victoria's Secret", personalCare.id);
-  await upsertCategory('lociones-arabes', 'Lociones Corporales Arabes', personalCare.id);
-  await upsertCategory('linea-fraiche', 'Productos de la Linea Fraiche', personalCare.id);
-
-  for (const [slug, name] of [
-    ['floral', 'Floral'],
-    ['citrico', 'Citrico'],
-    ['amaderado', 'Amaderado'],
-    ['fresco', 'Fresco'],
-    ['dulce', 'Dulce'],
-    ['oriental', 'Oriental'],
-    ['nicho', 'Nicho'],
-    ['arabe', 'Arabe'],
+  const categoryIds = await seedCategories();
+  const scentIds = new Map<string, string>();
+  for (const [slug, name, description] of [
+    ['floral', 'Floral', 'Rosas, jazmín, violetas y flores blancas.'],
+    ['citrico', 'Cítrico', 'Bergamota, limón, naranja, mandarina y toronja.'],
+    ['amaderado', 'Amaderado', 'Cedro, sándalo, vetiver, pachulí y oud.'],
+    ['fresco', 'Fresco', 'Acordes acuáticos, verdes, limpios y ligeros.'],
+    ['dulce', 'Dulce', 'Vainilla, caramelo, miel, chocolate y notas gourmand.'],
+    ['oriental', 'Oriental', 'Ámbar, almizcle, especias e incienso.'],
+    ['nicho', 'Nicho', 'Composiciones distintivas inspiradas en perfumería nicho.'],
+    ['arabe', 'Árabe', 'Acordes intensos de oud, ámbar, especias y resinas.'],
   ]) {
-    await prisma.scentFamily.upsert({
+    const scent = await prisma.scentFamily.upsert({
       where: { slug },
-      update: {},
-      create: { slug, name },
+      update: { name, description },
+      create: { slug, name, description },
     });
+    scentIds.set(scent.slug, scent.id);
   }
 
   const location = await prisma.storeLocation.upsert({
     where: { slug: 'tizimin-centro' },
-    update: {},
-    create: {
-      slug: 'tizimin-centro',
-      name: 'Fraiche Tizimin',
+    update: {
+      name: 'Fraiche Tizimín',
       isDefault: true,
       isActive: true,
-      address: { city: 'Tizimin', state: 'Yucatan', country: 'MX' },
+      address: {
+        street: 'C. 56 396, entre 45 y 47',
+        neighborhood: 'Centro',
+        postalCode: '97700',
+        city: 'Tizimín',
+        state: 'Yucatán',
+        country: 'MX',
+      },
+    },
+    create: {
+      slug: 'tizimin-centro',
+      name: 'Fraiche Tizimín',
+      isDefault: true,
+      isActive: true,
+      address: {
+        street: 'C. 56 396, entre 45 y 47',
+        neighborhood: 'Centro',
+        postalCode: '97700',
+        city: 'Tizimín',
+        state: 'Yucatán',
+        country: 'MX',
+      },
     },
   });
 
-  const seededProducts: SeedProduct[] = [
-    {
-      slug: 'elegance-floral-clasico',
-      name: 'Elegance Floral',
-      shortDescription: 'Inspiracion floral ligera para todos los dias.',
-      description: 'Fragancia de la linea Fraiche inspirada en perfumeria de disenador.',
-      line: ProductLine.DESIGNER_CLASSIC,
-      brandSlug: 'fraiche',
-      categorySlug: 'disenador-clasico',
-      scentSlugs: ['floral', 'fresco'],
-      sku: 'FRA-DIS-CLA-001-60',
-      variantName: '60 ml Clasica',
-      concentrationLabel: 'Clasica',
-      volumeMl: 60,
-      catalogPriceCents: 32000,
-      stock: 30,
-      isFeatured: true,
+  await prisma.product.updateMany({
+    where: {
+      slug: {
+        in: [
+          'elegance-floral-clasico',
+          'noir-intense-37',
+          'neeche-passion-floral',
+          'premium-oud-royal',
+          'crema-corporal-fraiche-floral',
+        ],
+      },
     },
-    {
-      slug: 'noir-intense-37',
-      name: 'Noir Intense',
-      shortDescription: 'Aroma profundo con mayor intensidad y duracion.',
-      description: 'Perfume de disenador con 37% de esencia en presentacion de 60 ml.',
-      line: ProductLine.DESIGNER_37,
-      brandSlug: 'fraiche',
-      categorySlug: 'disenador-37',
-      scentSlugs: ['amaderado', 'oriental'],
-      sku: 'FRA-DIS-37-001-60',
-      variantName: '60 ml 37%',
-      concentrationLabel: '37%',
-      concentrationPercent: 37,
-      volumeMl: 60,
-      catalogPriceCents: 42000,
-      stock: 24,
-      isNew: true,
-    },
-    {
-      slug: 'neeche-passion-floral',
-      name: 'Neeche Passion Floral',
-      shortDescription: 'Fragancia expresiva, suave y memorable.',
-      description: 'Neeche Passion en concentracion normal y presentacion de 60 ml.',
-      line: ProductLine.NEECHE_PASSION,
-      brandSlug: 'neeche',
-      categorySlug: 'neeche-passion',
-      scentSlugs: ['floral', 'dulce'],
-      sku: 'NEE-PAS-001-60',
-      variantName: '60 ml Clasica',
-      concentrationLabel: 'Normal',
-      volumeMl: 60,
-      stock: 40,
-      isFeatured: true,
-    },
-    {
-      slug: 'premium-oud-royal',
-      name: 'Premium Oud Royal',
-      shortDescription: 'Inspiracion arabe con oud y matices orientales.',
-      description: 'Perfume Premium de inspiracion nicho y arabe con 37% de esencia.',
-      line: ProductLine.PREMIUM,
-      brandSlug: 'premium',
-      categorySlug: 'premium',
-      scentSlugs: ['arabe', 'nicho', 'oriental'],
-      sku: 'PRE-OUD-001-60',
-      variantName: '60 ml 37%',
-      concentrationLabel: '37%',
-      concentrationPercent: 37,
-      volumeMl: 60,
-      stock: 35,
-      isFeatured: true,
-      isNew: true,
-    },
-    {
-      slug: 'crema-corporal-fraiche-floral',
-      name: 'Crema Corporal Floral',
-      shortDescription: 'Hidratacion diaria con aroma floral fresco.',
-      description: 'Crema corporal de la linea Fraiche para complementar tu fragancia.',
-      line: ProductLine.PERSONAL_CARE,
-      brandSlug: 'fraiche',
-      categorySlug: 'cremas-corporales',
-      scentSlugs: ['floral', 'fresco'],
-      sku: 'CARE-CREAM-001-250',
-      variantName: '250 ml',
-      volumeMl: 250,
-      catalogPriceCents: 18000,
-      stock: 20,
-    },
-  ];
+    data: { status: ProductStatus.ARCHIVED },
+  });
 
-  const products = [];
-  for (const seed of seededProducts) {
-    products.push(await seedProduct(seed, location.id));
+  const catalog = loadInventoryCatalog();
+  const batchSize = 16;
+  for (let index = 0; index < catalog.length; index += batchSize) {
+    await Promise.all(
+      catalog
+        .slice(index, index + batchSize)
+        .map((entry) =>
+          seedCatalogProduct(entry, location.id, brandIds, categoryIds, scentIds),
+        ),
+    );
   }
 
   await prisma.paymentInstruction.upsert({
     where: { method: PaymentMethod.BANK_TRANSFER },
-    update: {},
+    update: {
+      title: 'Transferencia a Mercado Pago',
+      instructions:
+        'Transfiere el total exacto de tu pedido y adjunta el comprobante. Confirmaremos el pago después de revisarlo.',
+      accountData: {
+        clabe: '722969020182233026',
+        beneficiary: 'Ivonne Michel Gastelum Fernandez',
+        institution: 'Mercado Pago W',
+        dimoPhone: '-',
+      },
+      isActive: true,
+    },
     create: {
       method: PaymentMethod.BANK_TRANSFER,
-      title: 'Transferencia bancaria',
-      instructions: 'Realiza la transferencia y adjunta tu comprobante. La orden se confirma despues de la revision.',
-      accountData: { configured: false },
+      title: 'Transferencia a Mercado Pago',
+      instructions:
+        'Transfiere el total exacto de tu pedido y adjunta el comprobante. Confirmaremos el pago después de revisarlo.',
+      accountData: {
+        clabe: '722969020182233026',
+        beneficiary: 'Ivonne Michel Gastelum Fernandez',
+        institution: 'Mercado Pago W',
+        dimoPhone: '-',
+      },
+      isActive: true,
     },
   });
 
   await prisma.paymentInstruction.upsert({
     where: { method: PaymentMethod.CASH },
-    update: {},
+    update: {
+      title: 'Pago en efectivo',
+      instructions: 'Paga al recoger tu pedido en Fraiche Tizimín.',
+      isActive: true,
+    },
     create: {
       method: PaymentMethod.CASH,
       title: 'Pago en efectivo',
-      instructions: 'Paga al recoger tu pedido en Fraiche Tizimin.',
+      instructions: 'Paga al recoger tu pedido en Fraiche Tizimín.',
+      isActive: true,
     },
   });
 
-  const now = new Date();
-  const endsAt = new Date(now);
-  endsAt.setMonth(endsAt.getMonth() + 1);
-
-  const promotion = await prisma.promotion.upsert({
+  const welcomePromotion = await prisma.promotion.upsert({
     where: { slug: 'bienvenida-fraiche' },
     update: {
-      requiresCode: true,
+      code: null,
+      name: '10% en tu primera compra',
+      description:
+        'Crea tu cuenta y recibe automáticamente 10% de descuento en tu primera compra.',
+      type: PromotionType.PERCENTAGE,
+      value: 10,
+      minimumCents: 0,
+      maximumUses: null,
+      maximumDiscountCents: null,
+      perCustomerLimit: 1,
+      endsAt: null,
+      isActive: true,
+      isFeatured: true,
+      requiresCode: false,
+      isStackable: false,
+      priority: 100,
       placement: PromotionPlacement.WELCOME,
     },
     create: {
       slug: 'bienvenida-fraiche',
-      code: 'FRAICHE10',
-      name: 'Bienvenida Fraiche',
-      description: '10% de descuento en productos seleccionados.',
+      code: null,
+      name: '10% en tu primera compra',
+      description:
+        'Crea tu cuenta y recibe automáticamente 10% de descuento en tu primera compra.',
       type: PromotionType.PERCENTAGE,
       value: 10,
-      startsAt: now,
-      endsAt,
+      minimumCents: 0,
+      startsAt: new Date('2026-01-01T00:00:00.000Z'),
+      endsAt: null,
       isActive: true,
       isFeatured: true,
-      requiresCode: true,
+      requiresCode: false,
+      isStackable: false,
+      priority: 100,
       placement: PromotionPlacement.WELCOME,
+      perCustomerLimit: 1,
     },
   });
-
-  for (const product of products.slice(0, 2)) {
-    await prisma.promotionProduct.upsert({
-      where: {
-        promotionId_productId: { promotionId: promotion.id, productId: product.id },
-      },
-      update: {},
-      create: { promotionId: promotion.id, productId: product.id },
-    });
-  }
+  await prisma.$transaction([
+    prisma.promotionProduct.deleteMany({
+      where: { promotionId: welcomePromotion.id },
+    }),
+    prisma.promotionCategory.deleteMany({
+      where: { promotionId: welcomePromotion.id },
+    }),
+  ]);
 }
 
 main()

@@ -20,7 +20,12 @@ import {
   UserRole,
 } from '@prisma/client';
 import { CreateOrderDto, ListCustomerOrdersDto } from './order.dto';
-import { calculatePromotionDiscount, selectAppliedPromotions } from './commerce-rules';
+import {
+  calculatePromotionDiscount,
+  customerCanUsePromotion,
+  reservationLifetimeMs,
+  selectAppliedPromotions,
+} from './commerce-rules';
 import { PricingService } from './pricing.service';
 import { PrismaService } from './prisma.service';
 
@@ -293,7 +298,7 @@ export class OrdersService {
           : { requiresCode: false }),
         isActive: true,
         startsAt: { lte: now },
-        endsAt: { gte: now },
+        OR: [{ endsAt: null }, { endsAt: { gte: now } }],
       },
       include: { products: true, categories: true },
       orderBy: [{ priority: 'desc' }, { startsAt: 'desc' }],
@@ -304,6 +309,15 @@ export class OrdersService {
       throw new BadRequestException('La promocion no existe o ya no esta vigente.');
     }
 
+    const hasPreviousOrder =
+      (await transaction.order.count({
+        where: {
+          customerId,
+          status: {
+            notIn: [OrderStatus.CANCELLED, OrderStatus.EXPIRED],
+          },
+        },
+      })) > 0;
     const customerPromotionUsage = promotionCandidates.length
       ? await transaction.orderPromotion.groupBy({
           by: ['promotionId'],
@@ -319,6 +333,7 @@ export class OrdersService {
       customerPromotionUsage.map((entry) => [entry.promotionId, entry._count._all]),
     );
     const evaluatedPromotions = promotionCandidates.flatMap((candidate) => {
+      if (!customerCanUsePromotion(candidate.placement, hasPreviousOrder)) return [];
       if (candidate.maximumUses !== null && candidate.uses >= candidate.maximumUses) return [];
       if (
         candidate.perCustomerLimit !== null &&
@@ -375,7 +390,7 @@ export class OrdersService {
     const customerName = [customer.firstName, customer.lastName].filter(Boolean).join(' ');
     const paymentProvider = this.resolvePaymentProvider(input);
 
-    const expiresAt = new Date(Date.now() + 30 * 60 * 1000);
+    const expiresAt = new Date(Date.now() + reservationLifetimeMs(input.paymentMethod));
     const order = await transaction.order.create({
       data: {
         number: this.createOrderNumber(),

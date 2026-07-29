@@ -91,7 +91,7 @@ export type Promotion = {
   value: number;
   minimumCents: number;
   startsAt: string;
-  endsAt: string;
+  endsAt: string | null;
   isFeatured: boolean;
   placement: 'GENERAL' | 'DAILY' | 'MONTHLY' | 'FLASH' | 'WELCOME';
   requiresCode: boolean;
@@ -234,7 +234,14 @@ export type Order = {
     method: string;
     status: string;
     checkoutUrl?: string | null;
-    transferProofs?: unknown[];
+    transferProofs?: Array<{
+      id: string;
+      fileName: string;
+      status: 'PENDING_REVIEW' | 'APPROVED' | 'REJECTED';
+      reviewNotes?: string | null;
+      reviewedAt?: string | null;
+      createdAt: string;
+    }>;
   }>;
   createdAt: string;
   updatedAt: string;

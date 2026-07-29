@@ -36,7 +36,7 @@ body {
   background: var(--paper);
   color: var(--ink);
   font-family: var(--font-body), var(--font-body-fallback);
-  font-size: 15px;
+  font-size: 20px;
   line-height: 1.6;
   text-rendering: optimizeLegibility;
 }
@@ -112,7 +112,7 @@ h3 {
 .menuEyebrow {
   display: inline-block;
   color: var(--emerald-bright);
-  font-size: 11px;
+  font-size: 15px;
   font-weight: 800;
   letter-spacing: 0;
   line-height: 1.2;
@@ -391,13 +391,13 @@ h3 {
 }
 
 .brandIdentity--compact .brandIdentity__emblem {
-  width: 38px;
-  height: 38px;
-  flex-basis: 38px;
+  width: 42px;
+  height: 42px;
+  flex-basis: 42px;
 }
 
-.brandIdentity--compact .brandIdentity__name strong { font-size: 18px; }
-.brandIdentity--compact .brandIdentity__name small { font-size: 6px; }
+.brandIdentity--compact .brandIdentity__name strong { font-size: 21px; }
+.brandIdentity--compact .brandIdentity__name small { font-size: 9px; }
 
 .brandIdentity--inverted { color: var(--white); }
 .brandIdentity--inverted .brandIdentity__name small { color: rgba(255, 255, 255, 0.6); }
@@ -986,6 +986,39 @@ h3 {
   transition: transform 600ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
+.productMediaPlaceholder {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 18px;
+  background:
+    linear-gradient(145deg, rgba(255, 255, 255, 0.58), rgba(201, 231, 223, 0.82)),
+    var(--mint);
+  color: var(--emerald);
+  text-align: center;
+  flex-direction: column;
+  gap: 9px;
+}
+
+.productMediaPlaceholder > span {
+  max-width: 150px;
+  font-size: 9px;
+  font-weight: 800;
+  line-height: 1.35;
+  text-transform: uppercase;
+}
+
+.productMediaPlaceholder--compact {
+  padding: 6px;
+  gap: 4px;
+}
+
+.productMediaPlaceholder--compact > span {
+  font-size: 7px;
+}
+
 .productCard:hover .productCard__media img {
   transform: scale(1.035);
 }
@@ -1022,8 +1055,8 @@ h3 {
   top: 8px;
   right: 8px;
   display: grid;
-  width: 38px;
-  height: 38px;
+  width: 44px;
+  height: 44px;
   place-items: center;
   border: 1px solid rgba(255, 255, 255, 0.65);
   border-radius: 50%;
@@ -1273,6 +1306,76 @@ h3 {
   border-radius: 50%;
 }
 
+.siteFooter__textButton {
+  border: 0;
+  border-bottom: 1px solid currentColor;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+}
+
+.cookieConsent {
+  position: fixed;
+  z-index: 150;
+  right: 18px;
+  bottom: 18px;
+  left: 18px;
+  display: flex;
+  max-width: 720px;
+  margin: 0 auto;
+  align-items: center;
+  justify-content: space-between;
+  border: 1px solid rgba(255, 255, 255, 0.55);
+  border-radius: 8px;
+  padding: 18px;
+  background: rgba(250, 251, 248, 0.92);
+  box-shadow: 0 22px 70px rgba(11, 42, 35, 0.2);
+  color: var(--ink);
+  -webkit-backdrop-filter: blur(22px) saturate(1.25);
+  backdrop-filter: blur(22px) saturate(1.25);
+  gap: 18px;
+}
+
+.cookieConsent strong {
+  font-family: var(--font-display), var(--font-display-fallback);
+  font-size: 24px;
+}
+
+.cookieConsent p {
+  max-width: 430px;
+  margin: 3px 0;
+  color: var(--ink-soft);
+  font-size: 11px;
+  line-height: 1.55;
+}
+
+.cookieConsent a {
+  color: var(--emerald);
+  font-size: 10px;
+  font-weight: 800;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.cookieConsent__actions {
+  display: flex;
+  flex-shrink: 0;
+  gap: 8px;
+}
+
+@media (max-width: 700px) {
+  .cookieConsent {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .cookieConsent__actions {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
 .whatsappButton {
   position: fixed;
   z-index: 55;
@@ -1417,7 +1520,71 @@ h3 {
 
 .legalPage p {
   color: var(--ink-soft);
+  font-size: 15px;
+  line-height: 1.75;
+}
+
+.legalPage ul {
+  display: grid;
+  margin: 12px 0 24px;
+  padding-left: 22px;
+  color: var(--ink-soft);
+  font-size: 15px;
+  line-height: 1.7;
+  gap: 7px;
+}
+
+.legalPage a {
+  color: var(--emerald);
+  font-weight: 800;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.guideLinks {
+  display: grid;
+  margin: 18px 0 42px;
+  border-top: 1px solid var(--line);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.guideLinks a {
+  display: flex;
+  min-height: 122px;
+  padding: 20px;
+  justify-content: center;
+  border-right: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  color: var(--ink);
+  text-decoration: none;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.guideLinks a:nth-child(even) {
+  border-right: 0;
+}
+
+.guideLinks strong {
+  font-family: var(--font-display), var(--font-display-fallback);
+  font-size: 25px;
+}
+
+.guideLinks span {
+  color: var(--ink-soft);
   font-size: 12px;
+  line-height: 1.55;
+}
+
+@media (max-width: 620px) {
+  .guideLinks {
+    grid-template-columns: 1fr;
+  }
+
+  .guideLinks a {
+    min-height: 105px;
+    border-right: 0;
+  }
 }
 
 .formField {
@@ -1636,7 +1803,7 @@ h3 {
     height: 100%;
     align-items: center;
     gap: 4px;
-    font-size: 11px;
+    font-size: 14px;
     font-weight: 750;
     white-space: nowrap;
   }
@@ -1779,4 +1946,61 @@ h3 {
     scroll-behavior: auto !important;
     transition-duration: 0.01ms !important;
   }
+}
+.bankTransferDetails > p {
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: 9px;
+  line-height: 1.6;
+}
+
+.bankTransferDetails dl {
+  display: grid;
+  margin: 13px 0 0;
+  border-top: 1px solid var(--line);
+}
+
+.bankTransferDetails dl > div {
+  display: grid;
+  min-height: 38px;
+  align-items: center;
+  border-bottom: 1px solid var(--line);
+  padding: 6px 0;
+  grid-template-columns: 86px minmax(0, 1fr);
+  gap: 8px;
+}
+
+.bankTransferDetails dt {
+  color: var(--ink-soft);
+  font-size: 7px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.bankTransferDetails dd {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  margin: 0;
+  color: var(--ink);
+  font-size: 9px;
+  overflow-wrap: anywhere;
+  gap: 8px;
+}
+
+.bankTransferDetails dd strong {
+  letter-spacing: 0;
+}
+
+.bankTransferDetails dd button {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 1px solid var(--line-dark);
+  border-radius: 50%;
+  background: var(--white);
+  color: var(--emerald);
 }

@@ -4,6 +4,7 @@ import { ProductCard } from '@/components/store/product-card';
 import { ProductDetail } from '@/components/catalog/product-detail';
 import { SectionHeading } from '@/components/ui/section-heading';
 import { apiRequest, ApiError } from '@/lib/api';
+import { jsonLd, productBreadcrumbSchema, productSchema } from '@/lib/seo';
 import type { Product, ProductListResponse } from '@/lib/types';
 
 type ProductPageProps = { params: Promise<{ slug: string }> };
@@ -24,7 +25,21 @@ export async function generateMetadata({ params }: ProductPageProps): Promise<Me
     title: product.seoTitle ?? product.name,
     description: product.seoDescription ?? product.shortDescription ?? product.description ?? undefined,
     alternates: { canonical: `/productos/${product.slug}` },
-    openGraph: { title: product.name, description: product.shortDescription ?? undefined, images: product.images[0]?.url ? [{ url: product.images[0].url }] : undefined },
+    openGraph: {
+      title: product.seoTitle ?? product.name,
+      description: product.seoDescription ?? product.shortDescription ?? undefined,
+      url: `/productos/${product.slug}`,
+      type: 'website',
+      images: product.images[0]?.url
+        ? [{ url: product.images[0].url, alt: product.images[0].altText || product.name }]
+        : undefined,
+    },
+    twitter: {
+      card: 'summary_large_image',
+      title: product.seoTitle ?? product.name,
+      description: product.seoDescription ?? product.shortDescription ?? undefined,
+      images: product.images[0]?.url ? [product.images[0].url] : undefined,
+    },
   };
 }
 
@@ -36,6 +51,8 @@ export default async function ProductPage({ params }: ProductPageProps) {
 
   return (
     <main className="productPage">
+      <script dangerouslySetInnerHTML={{ __html: jsonLd(productSchema(product)) }} type="application/ld+json" />
+      <script dangerouslySetInnerHTML={{ __html: jsonLd(productBreadcrumbSchema(product)) }} type="application/ld+json" />
       <ProductDetail product={product} />
       {relatedProducts.length > 0 && (
         <section className="relatedProducts section">

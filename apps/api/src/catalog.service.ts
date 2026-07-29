@@ -28,7 +28,7 @@ export class CatalogService {
       where: {
         isActive: true,
         ...(includeUpcoming ? {} : { startsAt: { lte: now } }),
-        endsAt: { gte: now },
+        OR: [{ endsAt: null }, { endsAt: { gte: now } }],
       },
       select: {
         slug: true,

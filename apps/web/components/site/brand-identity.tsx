@@ -11,11 +11,15 @@ export function BrandIdentity({
   logoUrl?: string;
   logoAlt?: string;
 }) {
+  const accessibleLogoAlt = logoAlt.toLocaleLowerCase('es-MX').includes("ki'ibok")
+    ? "KI'IBOK Exclusivo"
+    : logoAlt.replace(/\s*679g\s*$/i, '').trim() || "KI'IBOK Exclusivo";
+
   return (
     <span className={`brandIdentity ${compact ? 'brandIdentity--compact' : ''} ${inverted ? 'brandIdentity--inverted' : ''}`}>
       <span className="brandIdentity__emblem">
         <Image
-          alt={logoAlt}
+          alt={accessibleLogoAlt}
           height={1254}
           priority
           sizes={compact ? '38px' : '52px'}

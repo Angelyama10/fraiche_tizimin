@@ -317,6 +317,12 @@
   opacity: 0.55;
 }
 
+.catalogLoadMore {
+  display: flex;
+  padding: 38px 0 12px;
+  justify-content: center;
+}
+
 .catalogNoResults {
   display: flex;
   min-height: 480px;

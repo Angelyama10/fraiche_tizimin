@@ -14,7 +14,7 @@ export const DEFAULT_SITE_CONTENT: SiteContentDocument = {
         { id: 'cuidado-personal', kind: 'LINK', label: 'Cuidado personal', href: '/productos?line=PERSONAL_CARE' },
         { id: 'promociones', kind: 'LINK', label: 'Promociones', href: '/promociones' },
         { id: 'pedidos-especiales', kind: 'LINK', label: 'Pedidos especiales', href: '/pedidos-especiales' },
-        { id: 'nosotros', kind: 'LINK', label: 'Nosotros', href: '/#nosotros' },
+        { id: 'nosotros', kind: 'LINK', label: 'Nosotros', href: '/nosotros' },
       ],
       menuEyebrow: 'Explora por línea',
       featureEyebrow: 'Nuestra selección',
@@ -29,8 +29,8 @@ export const DEFAULT_SITE_CONTENT: SiteContentDocument = {
       email: 'angelyama792@gmail.com',
       address: 'C. 56 396, entre 45 y 47, Centro, 97700 Tizimín, Yuc.',
       mapsEmbedUrl: 'https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d3721.166970482269!2d-88.15797412451728!3d21.14575248053305!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x8f522bc379f1112b%3A0x4e83441b1970ba72!2sFraiche%20Tizmin!5e0!3m2!1ses-419!2smx!4v1784400980423!5m2!1ses-419!2smx',
-      instagramUrl: 'https://www.instagram.com/',
-      facebookUrl: 'https://www.facebook.com/',
+      instagramUrl: '',
+      facebookUrl: '',
     },
     footer: {
       eyebrow: 'KI’IBOK Exclusivo',
@@ -67,6 +67,7 @@ export const DEFAULT_SITE_CONTENT: SiteContentDocument = {
         imageUrl: '',
         ctaLabel: 'Explorar catálogo',
         ctaHref: '/productos',
+        scentLinks: [],
       },
       {
         id: 'colecciones',
@@ -79,6 +80,7 @@ export const DEFAULT_SITE_CONTENT: SiteContentDocument = {
         imageUrl: '',
         ctaLabel: '',
         ctaHref: '',
+        scentLinks: [],
       },
       {
         id: 'favoritos',
@@ -91,6 +93,7 @@ export const DEFAULT_SITE_CONTENT: SiteContentDocument = {
         imageUrl: '',
         ctaLabel: 'Ver favoritos',
         ctaHref: '/productos?featured=true',
+        scentLinks: [],
       },
       {
         id: 'familias-aromaticas',
@@ -103,6 +106,16 @@ export const DEFAULT_SITE_CONTENT: SiteContentDocument = {
         imageUrl: '',
         ctaLabel: '',
         ctaHref: '',
+        scentLinks: [
+          { id: 'amaderado', label: 'Amaderado', href: '/productos?scent=amaderado' },
+          { id: 'arabe', label: 'Árabe', href: '/productos?scent=arabe' },
+          { id: 'citrico', label: 'Cítrico', href: '/productos?scent=citrico' },
+          { id: 'dulce', label: 'Dulce', href: '/productos?scent=dulce' },
+          { id: 'floral', label: 'Floral', href: '/productos?scent=floral' },
+          { id: 'fresco', label: 'Fresco', href: '/productos?scent=fresco' },
+          { id: 'nicho', label: 'Nicho', href: '/productos?scent=nicho' },
+          { id: 'oriental', label: 'Oriental', href: '/productos?scent=oriental' },
+        ],
       },
       {
         id: 'oferta-mensual',
@@ -115,6 +128,7 @@ export const DEFAULT_SITE_CONTENT: SiteContentDocument = {
         imageUrl: '/images/products/premium-oud.png',
         ctaLabel: 'Ver promociones',
         ctaHref: '/promociones',
+        scentLinks: [],
       },
       {
         id: 'nosotros',
@@ -127,6 +141,7 @@ export const DEFAULT_SITE_CONTENT: SiteContentDocument = {
         imageUrl: '',
         ctaLabel: 'Cómo llegar',
         ctaHref: '',
+        scentLinks: [],
       },
       {
         id: 'pedido-especial',
@@ -139,6 +154,7 @@ export const DEFAULT_SITE_CONTENT: SiteContentDocument = {
         imageUrl: '',
         ctaLabel: 'Solicitar aroma',
         ctaHref: '/pedidos-especiales',
+        scentLinks: [],
       },
     ],
   },

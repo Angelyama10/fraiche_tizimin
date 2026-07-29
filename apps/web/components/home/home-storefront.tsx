@@ -93,13 +93,21 @@ export function HomeStorefront({
                 <div className="pageWidth"><SectionHeading eyebrow={section.eyebrow} title={section.title} description={section.description} href={section.ctaHref || undefined} linkLabel={section.ctaLabel || undefined} />{favorites.length ? <div className="productGrid productGrid--home">{favorites.slice(0, 4).map((product, index) => <ProductCard key={product.id} product={product} priority={index < 2} />)}</div> : <CatalogEmpty />}</div>
               </section>
             );
-          case 'SCENT_FINDER':
+          case 'SCENT_FINDER': {
+            const scentLinks = section.scentLinks?.length
+              ? section.scentLinks
+              : (scents.length ? scents : fallbackScents).slice(0, 8).map((scent) => ({
+                  id: scent.slug,
+                  label: scent.name,
+                  href: `/productos?scent=${scent.slug}`,
+                }));
             return (
               <section className="scentFinder section cmsSection" id={section.id} key={section.id}>
                 <SectionBackground section={section} />
-                <div className="pageWidth scentFinder__inner"><div><span className="eyebrow eyebrow--light">{section.eyebrow}</span><h2>{section.title}</h2><p>{section.description}</p></div><div className="scentFinder__links">{(scents.length ? scents : fallbackScents).slice(0, 8).map((scent, index) => <Link href={`/productos?scent=${scent.slug}`} key={scent.slug}><span>{String(index + 1).padStart(2, '0')}</span>{scent.name}<ArrowRight aria-hidden="true" size={17} /></Link>)}</div></div>
+                <div className="pageWidth scentFinder__inner"><div><span className="eyebrow eyebrow--light">{section.eyebrow}</span><h2>{section.title}</h2><p>{section.description}</p></div><div className="scentFinder__links">{scentLinks.map((link, index) => <Link href={link.href} key={link.id}><span>{String(index + 1).padStart(2, '0')}</span>{link.label}<ArrowRight aria-hidden="true" size={17} /></Link>)}</div></div>
               </section>
             );
+          }
           case 'PROMOTION_BAND':
             return (
               <section className="offerBand section cmsSection" id={section.id} key={section.id}>

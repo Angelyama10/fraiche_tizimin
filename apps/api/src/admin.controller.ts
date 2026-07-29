@@ -51,6 +51,7 @@ import {
   UpdateSiteContentDto,
 } from './content/content.dto';
 import { SiteContentService } from './content/site-content.service';
+import { StorageService } from './storage.service';
 
 type AuthenticatedRequest = { user: AuthenticatedUser };
 
@@ -66,6 +67,7 @@ export class AdminController {
     private readonly inventoryAlerts: InventoryAlertsService,
     private readonly notifications: AdminNotificationsService,
     private readonly siteContent: SiteContentService,
+    private readonly storage: StorageService,
   ) {}
 
   @Roles(UserRole.ADMIN)
@@ -202,6 +204,11 @@ export class AdminController {
     @Body() input: ReviewTransferProofDto,
   ) {
     return this.payments.reviewTransferProof(proofId, input.status, input.notes);
+  }
+
+  @Get('transfer-proofs/:proofId/download')
+  downloadTransferProof(@Param('proofId') proofId: string) {
+    return this.storage.presignTransferProofDownload(proofId);
   }
 
   @Post('orders/:orderToken/confirm-cash')

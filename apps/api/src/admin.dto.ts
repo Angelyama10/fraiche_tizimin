@@ -1,5 +1,6 @@
 import { Type } from 'class-transformer';
 import {
+  ArrayMaxSize,
   ArrayMinSize,
   IsArray,
   IsBoolean,
@@ -22,7 +23,7 @@ import {
 } from '@prisma/client';
 
 export class CreateProductImageDto {
-  @IsUrl({ require_protocol: true })
+  @IsUrl({ require_protocol: true, require_tld: false })
   url!: string;
 
   @IsString()
@@ -101,8 +102,22 @@ export class CreateProductDto {
   @IsString()
   description?: string;
 
+  @IsOptional()
+  @IsString()
+  @MaxLength(70)
+  seoTitle?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(170)
+  seoDescription?: string;
+
   @IsEnum(ProductLine)
   line!: ProductLine;
+
+  @IsOptional()
+  @IsEnum(ProductStatus)
+  status?: ProductStatus;
 
   @IsOptional()
   @IsString()
@@ -126,6 +141,7 @@ export class CreateProductDto {
   isNew?: boolean;
 
   @IsArray()
+  @ArrayMaxSize(8)
   @ValidateNested({ each: true })
   @Type(() => CreateProductImageDto)
   images: CreateProductImageDto[] = [];
@@ -165,11 +181,31 @@ export class UpdateProductDto {
 
   @IsOptional()
   @IsString()
-  seoTitle?: string;
+  @MaxLength(70)
+  seoTitle?: string | null;
 
   @IsOptional()
   @IsString()
-  seoDescription?: string;
+  @MaxLength(170)
+  seoDescription?: string | null;
+
+  @IsOptional()
+  @IsArray()
+  @ArrayMinSize(1)
+  @IsString({ each: true })
+  categorySlugs?: string[];
+
+  @IsOptional()
+  @IsArray()
+  @IsString({ each: true })
+  scentSlugs?: string[];
+
+  @IsOptional()
+  @IsArray()
+  @ArrayMaxSize(8)
+  @ValidateNested({ each: true })
+  @Type(() => CreateProductImageDto)
+  images?: CreateProductImageDto[];
 }
 
 export class UpdateVariantDto {

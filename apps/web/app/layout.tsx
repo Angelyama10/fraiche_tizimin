@@ -2,7 +2,9 @@ import type { Metadata, Viewport } from 'next';
 import { Cormorant_Garamond, Manrope } from 'next/font/google';
 import { AppProviders } from '@/providers/app-providers';
 import { SiteShell } from '@/components/site-shell';
+import { AnalyticsConsent } from '@/components/site/analytics-consent';
 import { getPublishedSiteContent } from '@/lib/site-content';
+import { jsonLd, organizationSchema, SITE_URL } from '@/lib/seo';
 import './globals.css';
 
 const displayFont = Cormorant_Garamond({
@@ -20,7 +22,7 @@ const bodyFont = Manrope({
 });
 
 export const metadata: Metadata = {
-  metadataBase: new URL(process.env.NEXT_PUBLIC_WEB_URL ?? 'http://localhost:3000'),
+  metadataBase: new URL(SITE_URL),
   title: {
     default: "KI'IBOK Exclusivo | Perfumes Fraîche en Tizimín",
     template: "%s | KI'IBOK Exclusivo",
@@ -59,9 +61,14 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
   return (
     <html className={`${displayFont.variable} ${bodyFont.variable}`} data-scroll-behavior="smooth" lang="es-MX">
       <body>
+        <script
+          dangerouslySetInnerHTML={{ __html: jsonLd(organizationSchema(siteContent.global)) }}
+          type="application/ld+json"
+        />
         <AppProviders>
           <SiteShell content={siteContent}>{children}</SiteShell>
         </AppProviders>
+        <AnalyticsConsent />
       </body>
     </html>
   );

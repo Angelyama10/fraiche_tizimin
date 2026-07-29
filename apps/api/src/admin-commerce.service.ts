@@ -5,9 +5,8 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import {
-  DeliveryMethod,
-  FulfillmentStatus,
   OrderStatus,
+  PaymentMethod,
   PaymentStatus,
   PricingMode,
   Prisma,
@@ -25,7 +24,7 @@ import {
   UpdatePricingPolicyDto,
   UpdatePromotionDto,
 } from './admin-commerce.dto';
-import { canTransitionOrder } from './commerce-rules';
+import { canTransitionOrder, fulfillmentForOrderStatus } from './commerce-rules';
 import { OrdersService } from './orders.service';
 import { PrismaService } from './prisma.service';
 
@@ -253,7 +252,16 @@ export class AdminCommerceService {
         where,
         include: {
           _count: { select: { items: true, shipments: true } },
-          payments: { orderBy: { createdAt: 'desc' }, take: 1 },
+          payments: {
+            include: {
+              transferProofs: {
+                orderBy: { createdAt: 'desc' },
+                take: 3,
+              },
+            },
+            orderBy: { createdAt: 'desc' },
+            take: 1,
+          },
           shipments: { orderBy: { createdAt: 'desc' }, take: 1 },
         },
         orderBy: { createdAt: 'desc' },
@@ -316,13 +324,16 @@ export class AdminCommerceService {
     if (
       input.status !== order.status &&
       order.paymentStatus !== PaymentStatus.APPROVED &&
-      input.status !== OrderStatus.PROCESSING
+      !(
+        order.paymentMethod === PaymentMethod.CASH &&
+        (input.status === OrderStatus.PROCESSING || input.status === OrderStatus.READY)
+      )
     ) {
       throw new ConflictException('La orden necesita pago aprobado para avanzar.');
     }
 
     await this.prisma.$transaction(async (transaction) => {
-      const fulfillmentStatus = this.fulfillmentForOrderStatus(
+      const fulfillmentStatus = fulfillmentForOrderStatus(
         input.status,
         order.deliveryMethod,
         order.fulfillmentStatus,
@@ -404,7 +415,7 @@ export class AdminCommerceService {
             maximumUses: input.maximumUses,
             perCustomerLimit: input.perCustomerLimit,
             startsAt: new Date(input.startsAt),
-            endsAt: new Date(input.endsAt),
+            endsAt: input.endsAt ? new Date(input.endsAt) : null,
             isActive: input.isActive ?? true,
             isFeatured: input.isFeatured ?? false,
             placement: input.placement,
@@ -441,7 +452,10 @@ export class AdminCommerceService {
       type: input.type ?? before.type,
       value: input.value ?? before.value,
       startsAt: input.startsAt ?? before.startsAt.toISOString(),
-      endsAt: input.endsAt ?? before.endsAt.toISOString(),
+      endsAt:
+        input.endsAt === undefined
+          ? before.endsAt?.toISOString() ?? null
+          : input.endsAt,
       requiresCode: input.requiresCode ?? before.requiresCode,
       code: input.code ?? before.code ?? undefined,
     });
@@ -468,7 +482,12 @@ export class AdminCommerceService {
             maximumUses: input.maximumUses,
             perCustomerLimit: input.perCustomerLimit,
             startsAt: input.startsAt ? new Date(input.startsAt) : undefined,
-            endsAt: input.endsAt ? new Date(input.endsAt) : undefined,
+            endsAt:
+              input.endsAt === undefined
+                ? undefined
+                : input.endsAt
+                  ? new Date(input.endsAt)
+                  : null,
             isActive: input.isActive,
             isFeatured: input.isFeatured,
             placement: input.placement,
@@ -599,11 +618,11 @@ export class AdminCommerceService {
     type: PromotionType;
     value: number;
     startsAt: string;
-    endsAt: string;
+    endsAt?: string | null;
     requiresCode?: boolean;
     code?: string;
   }) {
-    if (new Date(input.endsAt) <= new Date(input.startsAt)) {
+    if (input.endsAt && new Date(input.endsAt) <= new Date(input.startsAt)) {
       throw new BadRequestException('La promocion debe terminar despues de iniciar.');
     }
     if (input.type === PromotionType.PERCENTAGE && input.value > 100) {
@@ -635,21 +654,6 @@ export class AdminCommerceService {
       throw new ConflictException('El slug o codigo de la promocion ya existe.');
     }
     throw error;
-  }
-
-  private fulfillmentForOrderStatus(
-    status: OrderStatus,
-    deliveryMethod: DeliveryMethod,
-    current: FulfillmentStatus,
-  ) {
-    if (status === OrderStatus.PROCESSING) return FulfillmentStatus.PREPARING;
-    if (status === OrderStatus.READY) {
-      return deliveryMethod === DeliveryMethod.STORE_PICKUP
-        ? FulfillmentStatus.READY_FOR_PICKUP
-        : current;
-    }
-    if (status === OrderStatus.COMPLETED) return FulfillmentStatus.DELIVERED;
-    return current;
   }
 
   private page<T>(data: T[], total: number, page: number, pageSize: number) {

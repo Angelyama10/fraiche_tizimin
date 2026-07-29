@@ -56,6 +56,8 @@ type WebhookInput = {
   body: Record<string, unknown>;
 };
 
+type OrderReservationState = 'ACTIVE' | 'FINALIZED' | 'INACTIVE';
+
 @Injectable()
 export class PaymentsService {
   constructor(
@@ -65,14 +67,23 @@ export class PaymentsService {
 
   paymentConfiguration() {
     const mercadoPagoPublicKey = this.config.get<string>('MERCADOPAGO_PUBLIC_KEY')?.trim();
+    const mercadoPagoAccessToken = this.config
+      .get<string>('MERCADOPAGO_ACCESS_TOKEN')
+      ?.trim();
+    const mercadoPagoWebhookSecret = this.config
+      .get<string>('MERCADOPAGO_WEBHOOK_SECRET')
+      ?.trim();
     const stripePublishableKey = this.config.get<string>('STRIPE_PUBLISHABLE_KEY')?.trim();
+    const mercadoPagoCardEnabled = Boolean(
+      mercadoPagoPublicKey &&
+        mercadoPagoAccessToken &&
+        mercadoPagoWebhookSecret,
+    );
     return {
       mercadoPago: {
-        enabled: Boolean(
-          mercadoPagoPublicKey &&
-            this.config.get<string>('MERCADOPAGO_ACCESS_TOKEN') &&
-            this.config.get<string>('MERCADOPAGO_WEBHOOK_SECRET'),
-        ),
+        enabled: mercadoPagoCardEnabled,
+        cardEnabled: mercadoPagoCardEnabled,
+        linkEnabled: Boolean(mercadoPagoAccessToken && mercadoPagoWebhookSecret),
         publicKey: mercadoPagoPublicKey || null,
       },
       stripe: {
@@ -557,12 +568,13 @@ export class PaymentsService {
     }
 
     const mappedStatus = this.mapMercadoPagoStatus(paymentData.status);
-    if (
-      mappedStatus === PaymentStatus.APPROVED &&
-      (await this.orderReservationIsInactive(order.id))
-    ) {
-      await this.refundLateMercadoPagoPayment(order.id, String(paymentData.id));
-      return PaymentStatus.REFUNDED;
+    if (mappedStatus === PaymentStatus.APPROVED) {
+      const reservationState = await this.orderReservationState(order.id);
+      if (reservationState === 'FINALIZED') return PaymentStatus.APPROVED;
+      if (reservationState === 'INACTIVE') {
+        await this.refundLateMercadoPagoPayment(order.id, String(paymentData.id));
+        return PaymentStatus.REFUNDED;
+      }
     }
 
     try {
@@ -599,12 +611,13 @@ export class PaymentsService {
         { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
       );
     } catch (error) {
-      if (
-        mappedStatus === PaymentStatus.APPROVED &&
-        (await this.orderReservationIsInactive(order.id))
-      ) {
-        await this.refundLateMercadoPagoPayment(order.id, String(paymentData.id));
-        return PaymentStatus.REFUNDED;
+      if (mappedStatus === PaymentStatus.APPROVED) {
+        const reservationState = await this.orderReservationState(order.id);
+        if (reservationState === 'FINALIZED') return PaymentStatus.APPROVED;
+        if (reservationState === 'INACTIVE') {
+          await this.refundLateMercadoPagoPayment(order.id, String(paymentData.id));
+          return PaymentStatus.REFUNDED;
+        }
       }
       throw error;
     }
@@ -631,12 +644,13 @@ export class PaymentsService {
     }
 
     const mappedStatus = this.mapStripeStatus(intent.status);
-    if (
-      mappedStatus === PaymentStatus.APPROVED &&
-      (await this.orderReservationIsInactive(order.id))
-    ) {
-      await this.refundLateStripePayment(order.id, intent.id);
-      return PaymentStatus.REFUNDED;
+    if (mappedStatus === PaymentStatus.APPROVED) {
+      const reservationState = await this.orderReservationState(order.id);
+      if (reservationState === 'FINALIZED') return PaymentStatus.APPROVED;
+      if (reservationState === 'INACTIVE') {
+        await this.refundLateStripePayment(order.id, intent.id);
+        return PaymentStatus.REFUNDED;
+      }
     }
 
     try {
@@ -672,32 +686,56 @@ export class PaymentsService {
         { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
       );
     } catch (error) {
-      if (
-        mappedStatus === PaymentStatus.APPROVED &&
-        (await this.orderReservationIsInactive(order.id))
-      ) {
-        await this.refundLateStripePayment(order.id, intent.id);
-        return PaymentStatus.REFUNDED;
+      if (mappedStatus === PaymentStatus.APPROVED) {
+        const reservationState = await this.orderReservationState(order.id);
+        if (reservationState === 'FINALIZED') return PaymentStatus.APPROVED;
+        if (reservationState === 'INACTIVE') {
+          await this.refundLateStripePayment(order.id, intent.id);
+          return PaymentStatus.REFUNDED;
+        }
       }
       throw error;
     }
     return mappedStatus;
   }
 
-  private async orderReservationIsInactive(orderId: string) {
+  private async orderReservationState(orderId: string): Promise<OrderReservationState> {
     const order = await this.prisma.order.findUnique({
       where: { id: orderId },
-      select: { status: true, expiresAt: true },
+      select: { status: true, paymentStatus: true, expiresAt: true },
     });
-    if (!order) return true;
-    if (order.status === OrderStatus.CANCELLED || order.status === OrderStatus.EXPIRED) {
-      return true;
-    }
-    if (order.expiresAt && order.expiresAt <= new Date()) return true;
+    const initialState = this.classifyOrderReservation(order);
+    if (initialState !== 'ACTIVE') return initialState;
+
     const activeReservations = await this.prisma.inventoryReservation.count({
       where: { orderItem: { orderId }, status: ReservationStatus.ACTIVE },
     });
-    return activeReservations === 0;
+    if (activeReservations > 0) return 'ACTIVE';
+
+    // The webhook and the browser can confirm the same PaymentIntent concurrently.
+    // Re-read the order because the other request may have consumed the reservation.
+    const latestOrder = await this.prisma.order.findUnique({
+      where: { id: orderId },
+      select: { status: true, paymentStatus: true, expiresAt: true },
+    });
+    const latestState = this.classifyOrderReservation(latestOrder);
+    return latestState === 'ACTIVE' ? 'INACTIVE' : latestState;
+  }
+
+  private classifyOrderReservation(
+    order: {
+      status: OrderStatus;
+      paymentStatus: PaymentStatus;
+      expiresAt: Date | null;
+    } | null,
+  ): OrderReservationState {
+    if (!order) return 'INACTIVE';
+    if (order.status === OrderStatus.CANCELLED || order.status === OrderStatus.EXPIRED) {
+      return 'INACTIVE';
+    }
+    if (order.paymentStatus === PaymentStatus.APPROVED) return 'FINALIZED';
+    if (order.expiresAt && order.expiresAt <= new Date()) return 'INACTIVE';
+    return 'ACTIVE';
   }
 
   private async refundLateMercadoPagoPayment(orderId: string, providerPaymentId: string) {

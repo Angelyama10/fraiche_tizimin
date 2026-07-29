@@ -4,9 +4,9 @@ import { ArrowRight, Minus, Plus, ShoppingBag, Trash2, X } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 import Image from 'next/image';
 import Link from 'next/link';
-import { lineFallbackImage } from '@/lib/catalog';
 import { formatMoney } from '@/lib/format';
 import { useCart } from '@/providers/cart-provider';
+import { ProductMediaPlaceholder } from './product-media-placeholder';
 
 export function CartDrawer() {
   const { cart, drawerOpen, setDrawerOpen, mutating, updateItem, removeItem } = useCart();
@@ -55,12 +55,14 @@ export function CartDrawer() {
                   {cart.items.map((item) => (
                     <article className="cartLine" key={item.id}>
                       <Link className="cartLine__image" href={`/productos/${item.product.slug}`} onClick={() => setDrawerOpen(false)}>
-                        <Image
-                          alt={item.product.image?.altText ?? item.product.name}
-                          fill
-                          sizes="96px"
-                          src={item.product.image?.url ?? lineFallbackImage(item.product.line)}
-                        />
+                        {item.product.image?.url ? (
+                          <Image
+                            alt={item.product.image.altText || item.product.name}
+                            fill
+                            sizes="96px"
+                            src={item.product.image.url}
+                          />
+                        ) : <ProductMediaPlaceholder compact name={item.product.name} />}
                       </Link>
                       <div className="cartLine__content">
                         <div>

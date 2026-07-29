@@ -57,7 +57,7 @@ export function PromotionsExperience({ promotions }: { promotions: Promotion[] }
                 <p>{promotion.description}</p>
                 <div className="promotionRow__terms">
                   <span><Sparkles aria-hidden="true" size={15} /> {promotion.type === 'PERCENTAGE' ? `${promotion.value}% de descuento` : `${formatMoney(promotion.value)} de descuento`}</span>
-                  <span><CalendarDays aria-hidden="true" size={15} /> {upcoming ? `Disponible desde ${formatDate(promotion.startsAt)}` : `Hasta ${formatDate(promotion.endsAt)}`}</span>
+                  <span><CalendarDays aria-hidden="true" size={15} /> {upcoming ? `Disponible desde ${formatDate(promotion.startsAt)}` : promotion.endsAt ? `Hasta ${formatDate(promotion.endsAt)}` : 'Beneficio sin fecha de cierre'}</span>
                   {promotion.minimumCents > 0 && <span>Compra mínima {formatMoney(promotion.minimumCents)}</span>}
                 </div>
               </div>

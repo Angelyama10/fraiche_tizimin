@@ -13,10 +13,10 @@ export const revalidate = 60;
 
 export default async function ProductsPage() {
   const [products, categories, scents] = await Promise.all([
-    apiRequest<ProductListResponse>('/products?take=50', { next: { revalidate: 60 } }).catch(() => ({ items: [], nextCursor: null })),
+    apiRequest<ProductListResponse>('/products?take=24', { next: { revalidate: 60 } }).catch(() => ({ items: [], nextCursor: null })),
     apiRequest<Category[]>('/categories', { next: { revalidate: 300 } }).catch(() => []),
     apiRequest<ScentFamily[]>('/scent-families', { next: { revalidate: 300 } }).catch(() => []),
   ]);
 
-  return <CatalogExperience initialProducts={products.items} categories={categories} scents={scents} />;
+  return <CatalogExperience initialProducts={products.items} initialNextCursor={products.nextCursor} categories={categories} scents={scents} />;
 }

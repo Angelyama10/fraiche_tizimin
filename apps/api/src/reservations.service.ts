@@ -97,7 +97,14 @@ export class ReservationsService {
           await transaction.order.updateMany({
             where: {
               id: reservation.orderItem.orderId,
-              status: OrderStatus.PENDING_PAYMENT,
+              status: {
+                in: [
+                  OrderStatus.PENDING_PAYMENT,
+                  OrderStatus.PROCESSING,
+                  OrderStatus.READY,
+                ],
+              },
+              paymentStatus: { not: PaymentStatus.APPROVED },
             },
             data: {
               status: OrderStatus.EXPIRED,

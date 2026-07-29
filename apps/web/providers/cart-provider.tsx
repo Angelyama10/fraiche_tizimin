@@ -10,6 +10,7 @@ import {
   useState,
 } from 'react';
 import { apiRequest, errorMessage } from '@/lib/api';
+import { trackEvent } from '@/lib/analytics';
 import type { Cart } from '@/lib/types';
 import { useAuth } from './auth-provider';
 import { useNotify } from './notification-provider';
@@ -113,12 +114,26 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
   const addItem = useCallback(
     async (variantId: string, quantity = 1) => {
       try {
-        await mutate((activeCart) =>
+        const updated = await mutate((activeCart) =>
           apiRequest<Cart>(`/carts/${activeCart.publicToken}/items`, {
             method: 'POST',
             body: JSON.stringify({ variantId, quantity }),
           }),
         );
+        const added = updated.items.find((item) => item.variantId === variantId);
+        if (added) {
+          trackEvent('add_to_cart', {
+            currency: added.currency,
+            value: (added.unitPriceCents * quantity) / 100,
+            items: [{
+              item_id: variantId,
+              item_name: added.product.name,
+              item_variant: added.variant.name,
+              price: added.unitPriceCents / 100,
+              quantity,
+            }],
+          });
+        }
         setDrawerOpen(true);
         notify({ title: 'Añadido a tu selección', description: 'Tu carrito se actualizó al instante.', tone: 'success' });
       } catch (error) {

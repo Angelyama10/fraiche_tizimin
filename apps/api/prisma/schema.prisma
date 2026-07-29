@@ -794,7 +794,7 @@ model Promotion {
   maximumUses          Int?
   uses                 Int                 @default(0)
   startsAt             DateTime
-  endsAt               DateTime
+  endsAt               DateTime?
   isActive             Boolean             @default(true)
   isFeatured           Boolean             @default(false)
   placement            PromotionPlacement  @default(GENERAL)

@@ -12,6 +12,7 @@ import type { Product } from '@/lib/types';
 import { useAuth } from '@/providers/auth-provider';
 import { useCart } from '@/providers/cart-provider';
 import { useNotify } from '@/providers/notification-provider';
+import { ProductMediaPlaceholder } from '@/components/store/product-media-placeholder';
 
 export function ProductDetail({ product }: { product: Product }) {
   const [variantId, setVariantId] = useState(product.variants.find((variant) => variant.inStock)?.id ?? product.variants[0]?.id ?? '');
@@ -57,7 +58,9 @@ export function ProductDetail({ product }: { product: Product }) {
       <div className="productDetail__layout">
         <div className="productGallery">
           <div className="productGallery__main">
-            <Image alt={productImageAlt(product)} fill preload sizes="(max-width: 850px) 100vw, 52vw" src={image} unoptimized={image.startsWith('http')} />
+            {image ? (
+              <Image alt={productImageAlt(product)} fill preload sizes="(max-width: 850px) 100vw, 52vw" src={image} unoptimized={image.startsWith('http')} />
+            ) : <ProductMediaPlaceholder name={product.name} />}
             <span className="productGallery__mark">Fraîche Tizimín</span>
           </div>
         </div>
@@ -65,7 +68,7 @@ export function ProductDetail({ product }: { product: Product }) {
           <span className="eyebrow">{LINE_LABELS[product.line]}</span>
           <h1>{product.name}</h1>
           <p className="productBuyBox__description">{product.shortDescription}</p>
-          <div className="productBuyBox__rating"><span>★★★★★</span><small>Selección de la casa</small></div>
+          <div className="productBuyBox__rating"><Sparkles aria-hidden="true" size={15} /><small>Selección de la casa</small></div>
           <div className="productBuyBox__price">
             {variant?.compareAtPriceCents && <del>{formatMoney(variant.compareAtPriceCents, variant.currency)}</del>}
             <strong>{formatMoney(variant?.priceCents, variant?.currency)}</strong>
@@ -107,7 +110,7 @@ export function ProductDetail({ product }: { product: Product }) {
           <div className="productAccordions">
             <details open><summary>El aroma <ChevronDown aria-hidden="true" size={16} /></summary><div><p>{product.description ?? product.shortDescription}</p><div className="scentChips">{product.scentFamilies.map((scent) => <Link href={`/productos?scent=${scent.slug}`} key={scent.id}>{scent.name}</Link>)}</div></div></details>
             <details><summary>Concentración y presentación <ChevronDown aria-hidden="true" size={16} /></summary><div><p>{variant?.concentrationLabel ?? 'Concentración clásica'}{variant?.volumeMl ? ` · ${variant.volumeMl} ml` : ''}.</p></div></details>
-            <details><summary>Envíos y pagos <ChevronDown aria-hidden="true" size={16} /></summary><div><p>Paga con tarjeta, link, transferencia o efectivo al recoger. El seguimiento aparece en tu cuenta cuando la guía está lista.</p></div></details>
+            <details><summary>Envíos y pagos <ChevronDown aria-hidden="true" size={16} /></summary><div><p>Paga con tarjeta, link, transferencia o efectivo al recoger. El seguimiento aparece en tu cuenta cuando la guía está lista.</p><Link href="/envios-y-devoluciones">Consultar envíos, cambios y devoluciones</Link></div></details>
           </div>
         </div>
       </div>

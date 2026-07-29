@@ -12,7 +12,40 @@ import { ProductCard } from '@/components/store/product-card';
 
 const lines = Object.entries(LINE_LABELS) as Array<[ProductLine, string]>;
 
-export function CatalogExperience({ initialProducts, categories, scents }: { initialProducts: Product[]; categories: Category[]; scents: ScentFamily[] }) {
+function buildProductParams({
+  query,
+  line,
+  category,
+  scent,
+  featured,
+}: {
+  query: string;
+  line: ProductLine | '';
+  category: string;
+  scent: string;
+  featured: boolean;
+}) {
+  const params = new URLSearchParams();
+  if (query.trim()) params.set('q', query.trim());
+  if (line) params.set('line', line);
+  if (category) params.set('category', category);
+  if (scent) params.set('scent', scent);
+  if (featured) params.set('featured', 'true');
+  params.set('take', '24');
+  return params;
+}
+
+export function CatalogExperience({
+  initialProducts,
+  initialNextCursor,
+  categories,
+  scents,
+}: {
+  initialProducts: Product[];
+  initialNextCursor: string | null;
+  categories: Category[];
+  scents: ScentFamily[];
+}) {
   const searchParams = useSearchParams();
   const router = useRouter();
   const pathname = usePathname();
@@ -25,23 +58,20 @@ export function CatalogExperience({ initialProducts, categories, scents }: { ini
   const [featured, setFeatured] = useState(searchParams.get('featured') === 'true');
   const [sort, setSort] = useState('newest');
   const [loading, setLoading] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [nextCursor, setNextCursor] = useState(initialNextCursor);
   const [filtersOpen, setFiltersOpen] = useState(false);
 
   useEffect(() => {
     const controller = new AbortController();
     const timeout = window.setTimeout(async () => {
-      const params = new URLSearchParams();
-      if (query.trim()) params.set('q', query.trim());
-      if (line) params.set('line', line);
-      if (category) params.set('category', category);
-      if (scent) params.set('scent', scent);
-      if (featured) params.set('featured', 'true');
-      params.set('take', '50');
+      const params = buildProductParams({ query, line, category, scent, featured });
 
       setLoading(true);
       try {
         const result = await apiRequest<ProductListResponse>(`/products?${params.toString()}`, { signal: controller.signal, cache: 'no-store' });
         setProducts(result.items);
+        setNextCursor(result.nextCursor);
         params.delete('take');
         router.replace(`${pathname}${params.size ? `?${params.toString()}` : ''}`, { scroll: false });
       } catch (error) {
@@ -76,6 +106,25 @@ export function CatalogExperience({ initialProducts, categories, scents }: { ini
     setCategory('');
     setScent('');
     setFeatured(false);
+  }
+
+  async function loadMore() {
+    if (!nextCursor || loadingMore) return;
+    const params = buildProductParams({ query, line, category, scent, featured });
+    params.set('cursor', nextCursor);
+    setLoadingMore(true);
+    try {
+      const result = await apiRequest<ProductListResponse>(`/products?${params.toString()}`, { cache: 'no-store' });
+      setProducts((current) => {
+        const currentIds = new Set(current.map((product) => product.id));
+        return [...current, ...result.items.filter((product) => !currentIds.has(product.id))];
+      });
+      setNextCursor(result.nextCursor);
+    } catch (error) {
+      notify({ title: 'No pudimos cargar más productos', description: errorMessage(error), tone: 'error' });
+    } finally {
+      setLoadingMore(false);
+    }
   }
 
   const filters = (
@@ -142,7 +191,7 @@ export function CatalogExperience({ initialProducts, categories, scents }: { ini
         <aside className="catalogSidebar">{filters}</aside>
         <section className="catalogResults" aria-busy={loading} aria-live="polite">
           <div className="catalogResults__meta">
-            <p><strong>{sortedProducts.length}</strong> productos</p>
+            <p><strong>{sortedProducts.length}</strong> productos mostrados</p>
             {loading && <span><i /> Actualizando</span>}
           </div>
           {sortedProducts.length ? (
@@ -157,6 +206,13 @@ export function CatalogExperience({ initialProducts, categories, scents }: { ini
               <button className="button button--dark" onClick={clearFilters} type="button"><RotateCcw aria-hidden="true" size={17} /> Ver todos</button>
             </div>
           )}
+          {nextCursor && sortedProducts.length > 0 && (
+            <div className="catalogLoadMore">
+              <button className="button button--dark button--large" disabled={loadingMore} onClick={loadMore} type="button">
+                {loadingMore ? <><span className="buttonSpinner" /> Cargando productos</> : 'Cargar más productos'}
+              </button>
+            </div>
+          )}
         </section>
       </div>
 
@@ -167,7 +223,7 @@ export function CatalogExperience({ initialProducts, categories, scents }: { ini
             <motion.aside className="filterDrawer" initial={{ x: '-100%' }} animate={{ x: 0 }} exit={{ x: '-100%' }} transition={{ type: 'spring', damping: 30, stiffness: 320 }}>
               <div className="filterDrawer__header"><h2>Filtros</h2><button aria-label="Cerrar filtros" className="iconButton" onClick={() => setFiltersOpen(false)} type="button"><X aria-hidden="true" size={20} /></button></div>
               {filters}
-              <button className="button button--dark button--wide button--large" onClick={() => setFiltersOpen(false)} type="button">Ver {sortedProducts.length} productos</button>
+              <button className="button button--dark button--wide button--large" onClick={() => setFiltersOpen(false)} type="button">Ver {sortedProducts.length} productos cargados</button>
             </motion.aside>
           </>
         )}

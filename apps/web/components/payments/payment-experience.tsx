@@ -28,7 +28,12 @@ import type { Order } from '@/lib/types';
 import { useAuth } from '@/providers/auth-provider';
 
 type GatewayConfiguration = {
-  mercadoPago: { enabled: boolean; publicKey: string | null };
+  mercadoPago: {
+    enabled: boolean;
+    cardEnabled: boolean;
+    linkEnabled: boolean;
+    publicKey: string | null;
+  };
   stripe: { enabled: boolean; publishableKey: string | null };
 };
 
@@ -150,7 +155,7 @@ export function PaymentExperience({
   const provider = order.payments.find((payment) => payment.method === 'CARD')?.provider;
   const providerAvailable =
     provider === 'MERCADO_PAGO'
-      ? configuration.mercadoPago.enabled
+      ? configuration.mercadoPago.cardEnabled
       : provider === 'STRIPE'
         ? configuration.stripe.enabled
         : false;
@@ -319,27 +324,31 @@ function StripePaymentForm({ order }: { order: Order }) {
   const router = useRouter();
   const stripe = useStripe();
   const elements = useElements();
+  const [elementReady, setElementReady] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!stripe || !elements || submitting) return;
-    setSubmitting(true);
-    setError(null);
-    const result = await stripe.confirmPayment({
-      elements,
-      confirmParams: {
-        return_url: `${window.location.origin}/pago/${order.publicToken}?stripe_return=1`,
-      },
-      redirect: 'if_required',
-    });
-    if (result.error) {
-      setError(result.error.message ?? 'Stripe no pudo completar el pago.');
-      setSubmitting(false);
+    if (!stripe || !elements || !elementReady || submitting) {
+      setError('El formulario seguro de Stripe todavía no está disponible.');
       return;
     }
+    setSubmitting(true);
+    setError(null);
     try {
+      const result = await stripe.confirmPayment({
+        elements,
+        confirmParams: {
+          return_url: `${window.location.origin}/pago/${order.publicToken}?stripe_return=1`,
+        },
+        redirect: 'if_required',
+      });
+      if (result.error) {
+        setError(result.error.message ?? 'Stripe no pudo completar el pago.');
+        setSubmitting(false);
+        return;
+      }
       const synced = await auth.request<PaymentResult>(
         `/payments/stripe/orders/${order.publicToken}/sync`,
         { method: 'POST' },
@@ -364,10 +373,31 @@ function StripePaymentForm({ order }: { order: Order }) {
 
   return (
     <form className="stripePaymentForm" onSubmit={submit}>
-      <PaymentElement options={{ layout: 'accordion' }} />
+      <PaymentElement
+        onLoadError={(loadError) => {
+          setElementReady(false);
+          setError(
+            loadError.error.message ??
+              'Stripe no pudo cargar el formulario. Verifica las claves de producción.',
+          );
+        }}
+        onReady={() => {
+          setElementReady(true);
+          setError(null);
+        }}
+        options={{ layout: 'accordion' }}
+      />
       {error && <p className="paymentFormError">{error}</p>}
-      <button className="button button--dark button--large button--wide" disabled={!stripe || submitting} type="submit">
-        {submitting ? <span className="buttonSpinner" /> : <>Pagar {formatMoney(order.totalCents, order.currency)} <ArrowRight size={18} /></>}
+      <button
+        className="button button--dark button--large button--wide"
+        disabled={!stripe || !elements || !elementReady || submitting}
+        type="submit"
+      >
+        {submitting || !elementReady ? (
+          <span className="buttonSpinner" />
+        ) : (
+          <>Pagar {formatMoney(order.totalCents, order.currency)} <ArrowRight size={18} /></>
+        )}
       </button>
     </form>
   );

@@ -7,6 +7,7 @@ import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { LINE_LABELS, productImage, productImageAlt } from '@/lib/catalog';
+import { ProductMediaPlaceholder } from '@/components/store/product-media-placeholder';
 import { formatDate, formatMoney } from '@/lib/format';
 import type { SiteContentDocument } from '@/lib/site-content';
 import type { Product, Promotion } from '@/lib/types';
@@ -143,7 +144,9 @@ function ProductSpotlight({ product, direction, reduceMotion }: { product: Produ
   const description = product.shortDescription ?? product.description ?? 'Una fragancia elegida para dejar una impresión inolvidable.';
   return (
     <motion.article animate={{ opacity: 1, x: 0, filter: 'blur(0px)' }} className="heroSpotlight__product" exit={{ opacity: 0, x: direction * -18, filter: 'blur(3px)' }} initial={{ opacity: 0, x: direction * 22, filter: 'blur(3px)' }} transition={{ duration: reduceMotion ? 0 : 0.42, ease: [0.22, 1, 0.36, 1] }}>
-      <div className="heroSpotlight__image"><Image alt={productImageAlt(product)} fetchPriority="high" fill loading="eager" sizes="(max-width: 699px) 104px, 138px" src={image} unoptimized={image.startsWith('http')} /></div>
+      <div className="heroSpotlight__image">
+        {image ? <Image alt={productImageAlt(product)} fetchPriority="high" fill loading="eager" sizes="(max-width: 699px) 104px, 138px" src={image} unoptimized={image.startsWith('http')} /> : <ProductMediaPlaceholder compact name={product.name} />}
+      </div>
       <div className="heroSpotlight__details">
         <small>{product.brand?.name ?? 'Fraîche Tizimín'} · {product.scentFamilies[0]?.name ?? LINE_LABELS[product.line]}</small>
         <strong>{product.name}</strong>
@@ -162,7 +165,7 @@ function PromotionSpotlight({ promotion, direction, reduceMotion }: { promotion:
     <motion.article animate={{ opacity: 1, x: 0, filter: 'blur(0px)' }} className="heroSpotlight__product heroSpotlight__product--promotion" exit={{ opacity: 0, x: direction * -18, filter: 'blur(3px)' }} initial={{ opacity: 0, x: direction * 22, filter: 'blur(3px)' }} transition={{ duration: reduceMotion ? 0 : 0.42, ease: [0.22, 1, 0.36, 1] }}>
       <div className="heroSpotlight__image"><Image alt={promotion.name} fill sizes="(max-width: 699px) 104px, 138px" src={image} unoptimized={image.startsWith('http')} /></div>
       <div className="heroSpotlight__details">
-        <small>{upcoming ? `Disponible ${formatDate(promotion.startsAt)}` : `Válida hasta ${formatDate(promotion.endsAt)}`}</small>
+        <small>{upcoming ? `Disponible ${formatDate(promotion.startsAt)}` : promotion.endsAt ? `Válida hasta ${formatDate(promotion.endsAt)}` : 'Beneficio permanente'}</small>
         <strong>{promotion.name}</strong>
         <p>{promotion.description ?? 'Una oportunidad especial para descubrir tu próxima esencia.'}</p>
         <div>{promotion.code ? <span>Código {promotion.code}</span> : <span>Sin código</span>}<b>{promotion.type === 'PERCENTAGE' ? `${promotion.value}%` : formatMoney(promotion.value)}</b></div>
@@ -178,7 +181,7 @@ function PromotionSheet({ promotion }: { promotion: Promotion }) {
     <article className="offerSheet__feature">
       <div><Image alt={promotion.name} fill loading="eager" sizes="112px" src={image} unoptimized={image.startsWith('http')} /></div>
       <span>
-        <small>Hasta {formatDate(promotion.endsAt)}</small>
+        <small>{promotion.endsAt ? `Hasta ${formatDate(promotion.endsAt)}` : 'Sin fecha de cierre'}</small>
         <strong>{promotion.name}</strong>
         <p>{promotion.description}</p>
         {promotion.code && <b>Código {promotion.code}</b>}

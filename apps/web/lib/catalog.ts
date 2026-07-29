@@ -33,7 +33,7 @@ const LINE_FALLBACKS: Record<ProductLine, string> = {
 };
 
 export function productImage(product: Pick<Product, 'slug' | 'line' | 'images'>) {
-  return product.images[0]?.url || PRODUCT_FALLBACKS[product.slug] || LINE_FALLBACKS[product.line];
+  return product.images[0]?.url || PRODUCT_FALLBACKS[product.slug] || null;
 }
 
 export function productFallbackImage(slug: string) {
@@ -50,6 +50,7 @@ export function lineFallbackImage(line: ProductLine) {
 
 export function stockMessage(available: number) {
   if (available <= 0) return 'Agotado';
+  if (available === 1) return 'Solo 1 disponible';
   if (available <= 5) return `Solo ${available} disponibles`;
   return 'Disponible';
 }

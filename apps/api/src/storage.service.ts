@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { Injectable, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import { GetObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { PaymentMethod } from '@prisma/client';
 import { PresignTransferProofDto } from './payment.dto';
@@ -45,6 +45,25 @@ export class StorageService {
       expiresInSeconds: 600,
       requiredHeaders: { 'content-type': input.contentType },
     };
+  }
+
+  async presignTransferProofDownload(proofId: string) {
+    const proof = await this.prisma.transferProof.findUnique({
+      where: { id: proofId },
+      select: { objectKey: true, fileName: true, mimeType: true },
+    });
+    if (!proof) throw new NotFoundException('Comprobante no encontrado.');
+
+    const safeName = proof.fileName.replace(/["\r\n]/g, '-');
+    const command = new GetObjectCommand({
+      Bucket: this.requireConfig('STORAGE_PRIVATE_BUCKET'),
+      Key: proof.objectKey,
+      ResponseContentDisposition: `inline; filename="${safeName}"`,
+      ResponseContentType: proof.mimeType,
+    });
+    const url = await getSignedUrl(this.createClient(), command, { expiresIn: 300 });
+
+    return { url, expiresInSeconds: 300 };
   }
 
   async presignSiteImage(input: {

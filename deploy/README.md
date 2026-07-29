@@ -166,3 +166,17 @@ docker compose --env-file deploy/production.env -f compose.production.yml logs -
 # Restaurar un respaldo (solicita confirmacion)
 ./deploy/restore-postgres.sh deploy/backups/perfumes-FECHA.dump
 ```
+
+## Limpiar los datos de prueba
+
+Antes de cargar el catalogo real, este comando crea un respaldo y elimina
+productos, inventario, clientes, pedidos, pagos, promociones y solicitudes de
+prueba. Conserva el administrador, el contenido visual, las reglas de precio,
+las ubicaciones y las instrucciones de pago:
+
+```bash
+./deploy/reset-store-data.sh --confirm-reset
+```
+
+No ejecutes `deploy.sh --seed` despues de esta limpieza porque volveria a crear
+el catalogo de demostracion. Agrega el catalogo real desde `/admin`.

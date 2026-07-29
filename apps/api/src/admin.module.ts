@@ -10,6 +10,7 @@ import { ShipmentsModule } from './shipments.module';
 import { InventoryAlertsModule } from './inventory-alerts.module';
 import { AdminNotificationsService } from './admin-notifications.service';
 import { ContentModule } from './content/content.module';
+import { UploadsModule } from './uploads.module';
 
 @Module({
   imports: [
@@ -19,6 +20,7 @@ import { ContentModule } from './content/content.module';
     ShipmentsModule,
     InventoryAlertsModule,
     ContentModule,
+    UploadsModule,
   ],
   controllers: [AdminController],
   providers: [AdminService, AdminCommerceService, AdminNotificationsService, RolesGuard],

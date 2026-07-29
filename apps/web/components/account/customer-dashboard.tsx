@@ -23,18 +23,18 @@ import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
 import { errorMessage } from '@/lib/api';
-import { lineFallbackImage } from '@/lib/catalog';
 import { formatDate, formatMoney, initials } from '@/lib/format';
 import { FULFILLMENT_STATUS_LABELS, ORDER_STATUS_LABELS, PAYMENT_STATUS_LABELS, statusTone } from '@/lib/status';
 import type { CustomerAddress, CustomerProfile, Order, Paginated, WishlistEntry } from '@/lib/types';
 import { useAuth } from '@/providers/auth-provider';
 import { useNotify } from '@/providers/notification-provider';
+import { ProductMediaPlaceholder } from '@/components/store/product-media-placeholder';
 
 type Tab = 'resumen' | 'pedidos' | 'favoritos' | 'direcciones' | 'perfil';
 
 const navItems: Array<{ id: Tab; label: string; icon: typeof Home }> = [
   { id: 'resumen', label: 'Resumen', icon: Home },
-  { id: 'pedidos', label: 'Mis pedidos', icon: Package },
+  { id: 'pedidos', label: 'Mis compras', icon: Package },
   { id: 'favoritos', label: 'Favoritos', icon: Heart },
   { id: 'direcciones', label: 'Direcciones', icon: MapPin },
   { id: 'perfil', label: 'Mi perfil', icon: UserRound },
@@ -154,11 +154,11 @@ function Overview({ profile, orders, wishlistCount, addressesCount, onSelectTab 
 }
 
 function OrdersTab({ orders }: { orders: Order[] }) {
-  return <><div className="accountSectionHeading"><div><span className="eyebrow">Historial</span><h2>Mis pedidos</h2></div></div>{orders.length ? <div className="ordersList">{orders.map((order) => <article key={order.publicToken}><div className="ordersList__top"><div><span>{formatDate(order.createdAt)}</span><h3>{order.number}</h3></div><StatusBadge status={order.status} label={ORDER_STATUS_LABELS[order.status] ?? order.status} /></div><div className="ordersList__items"><Package size={17} /><span>{order.items?.length ?? 0} productos</span><strong>{formatMoney(order.totalCents, order.currency)}</strong></div><div className="ordersList__bottom"><span>{PAYMENT_STATUS_LABELS[order.paymentStatus] ?? order.paymentStatus}</span><Link href={`/pedidos/${order.publicToken}`}>Detalles y seguimiento <ArrowRight size={15} /></Link></div></article>)}</div> : <AccountEmpty icon={Package} title="Aún no hay pedidos" description="Tus compras aparecerán aquí con su pago y seguimiento." />}</>;
+  return <><div className="accountSectionHeading"><div><span className="eyebrow">Historial</span><h2>Mis compras</h2></div></div>{orders.length ? <div className="ordersList">{orders.map((order) => <article key={order.publicToken}><div className="ordersList__top"><div><span>{formatDate(order.createdAt)}</span><h3>{order.number}</h3></div><StatusBadge status={order.status} label={ORDER_STATUS_LABELS[order.status] ?? order.status} /></div><div className="ordersList__items"><Package size={17} /><span>{order.items?.length ?? 0} productos</span><strong>{formatMoney(order.totalCents, order.currency)}</strong></div><div className="ordersList__bottom"><span>{PAYMENT_STATUS_LABELS[order.paymentStatus] ?? order.paymentStatus}</span><Link href={`/pedidos/${order.publicToken}`}>Detalles y seguimiento <ArrowRight size={15} /></Link></div></article>)}</div> : <AccountEmpty icon={Package} title="Aún no hay compras" description="Tus compras aparecerán aquí con su pago y seguimiento." />}</>;
 }
 
 function WishlistTab({ entries, onRemove }: { entries: WishlistEntry[]; onRemove: (id: string) => void }) {
-  return <><div className="accountSectionHeading"><div><span className="eyebrow">Guardados</span><h2>Mis favoritos</h2></div></div>{entries.length ? <div className="wishlistGrid">{entries.map(({ product }) => { const variant = product.variants[0]; return <article key={product.id}><Link className="wishlistGrid__image" href={`/productos/${product.slug}`}><Image alt={product.image?.altText ?? product.name} fill sizes="(max-width: 700px) 45vw, 220px" src={product.image?.url ?? lineFallbackImage(product.line)} /></Link><button aria-label={`Quitar ${product.name}`} onClick={() => onRemove(product.id)} title="Quitar favorito" type="button"><X size={16} /></button><Link href={`/productos/${product.slug}`}><h3>{product.name}</h3><p>{product.shortDescription}</p><strong>{formatMoney(variant?.price.amountCents, variant?.price.currency)}</strong></Link></article>; })}</div> : <AccountEmpty icon={Heart} title="Tu tocador está listo" description="Guarda aquí los aromas que quieres volver a encontrar." />}</>;
+  return <><div className="accountSectionHeading"><div><span className="eyebrow">Guardados</span><h2>Mis favoritos</h2></div></div>{entries.length ? <div className="wishlistGrid">{entries.map(({ product }) => { const variant = product.variants[0]; return <article key={product.id}><Link className="wishlistGrid__image" href={`/productos/${product.slug}`}>{product.image?.url ? <Image alt={product.image.altText || product.name} fill sizes="(max-width: 700px) 45vw, 220px" src={product.image.url} /> : <ProductMediaPlaceholder name={product.name} />}</Link><button aria-label={`Quitar ${product.name}`} onClick={() => onRemove(product.id)} title="Quitar favorito" type="button"><X size={16} /></button><Link href={`/productos/${product.slug}`}><h3>{product.name}</h3><p>{product.shortDescription}</p><strong>{formatMoney(variant?.price.amountCents, variant?.price.currency)}</strong></Link></article>; })}</div> : <AccountEmpty icon={Heart} title="Tu tocador está listo" description="Guarda aquí los aromas que quieres volver a encontrar." />}</>;
 }
 
 function AddressesTab({ addresses, onAdd, onDelete }: { addresses: CustomerAddress[]; onAdd: () => void; onDelete: (id: string) => void }) {
