@@ -148,7 +148,7 @@ function ProductSpotlight({ product, direction, reduceMotion }: { product: Produ
         {image ? <Image alt={productImageAlt(product)} fetchPriority="high" fill loading="eager" sizes="(max-width: 699px) 104px, 138px" src={image} unoptimized={image.startsWith('http')} /> : <ProductMediaPlaceholder compact name={product.name} />}
       </div>
       <div className="heroSpotlight__details">
-        <small>{product.brand?.name ?? 'Fraîche Tizimín'} · {product.scentFamilies[0]?.name ?? LINE_LABELS[product.line]}</small>
+        <small>{product.brand?.name ?? 'Fraîche Tizimín'} · {LINE_LABELS[product.line]}</small>
         <strong>{product.name}</strong>
         <p>{description}</p>
         <div><span>{LINE_LABELS[product.line]}</span><b>{formatMoney(product.priceRange.minimumCents, product.priceRange.currency)}</b></div>

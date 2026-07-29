@@ -3,18 +3,16 @@ import Link from 'next/link';
 
 export const metadata: Metadata = {
   title: 'Guía para elegir perfume',
-  description: 'Una guía breve sobre concentración, familias aromáticas y uso de perfumes.',
+  description: 'Una guía breve sobre concentración, intensidad y uso de perfumes.',
   alternates: { canonical: '/guia-de-perfumes' },
 };
 
-const families = [
-  ['Floral', 'Pétalos, flores blancas y acordes suaves o románticos.', 'floral'],
-  ['Fresco', 'Notas limpias, verdes o acuáticas para una sensación ligera.', 'fresco'],
-  ['Cítrico', 'Bergamota, limón, mandarina y salidas luminosas.', 'citrico'],
-  ['Dulce', 'Vainilla, caramelo, frutas maduras y acordes envolventes.', 'dulce'],
-  ['Amaderado', 'Cedro, sándalo y vetiver con presencia elegante.', 'amaderado'],
-  ['Oriental', 'Especias, resinas y notas cálidas de gran personalidad.', 'oriental'],
-  ['Árabe y nicho', 'Composiciones intensas, oud y mezclas menos convencionales.', 'arabe'],
+const collections = [
+  ['Para todos los días', 'Concentración clásica y presencia ligera para acompañarte durante el día.', 'DESIGNER_CLASSIC'],
+  ['Mayor intensidad', 'Presentaciones al 37% para quienes buscan más presencia y duración.', 'DESIGNER_37'],
+  ['Neeche Passion', 'Fragancias de 60 ml con una selección propia de la línea.', 'NEECHE_PASSION'],
+  ['Nicho y árabe', 'Composiciones intensas y menos convencionales dentro de la línea Premium.', 'PREMIUM'],
+  ['Cuidado personal', 'Productos para complementar tu rutina de higiene, belleza y cuidado diario.', 'PERSONAL_CARE'],
 ];
 
 export default function PerfumeGuidePage() {
@@ -34,10 +32,10 @@ export default function PerfumeGuidePage() {
         espera unos minutos para conocer su evolución.
       </p>
 
-      <h2>Explora por familia</h2>
+      <h2>Explora según lo que buscas</h2>
       <div className="guideLinks">
-        {families.map(([name, description, slug]) => (
-          <Link href={`/productos?scent=${slug}`} key={name}>
+        {collections.map(([name, description, line]) => (
+          <Link href={`/productos?line=${line}`} key={name}>
             <strong>{name}</strong>
             <span>{description}</span>
           </Link>

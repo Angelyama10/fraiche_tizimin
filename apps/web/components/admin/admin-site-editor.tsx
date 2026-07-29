@@ -22,14 +22,18 @@ import Image from 'next/image';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { errorMessage } from '@/lib/api';
 import { LINE_LABELS } from '@/lib/catalog';
+import {
+  FALLBACK_CATALOG_NAVIGATION,
+  catalogLineHref,
+  mergeCatalogNavigation,
+} from '@/lib/catalog-navigation';
 import type {
   SiteContentDocument,
   StorefrontLink,
-  StorefrontScentLink,
   StorefrontSection,
   StorefrontSectionType,
 } from '@/lib/site-content';
-import type { Category, ProductLine, ScentFamily } from '@/lib/types';
+import type { CatalogNavigation, Category, ProductLine } from '@/lib/types';
 import type { AdminRequest } from './admin-app';
 
 type AdminContentResponse = {
@@ -67,7 +71,6 @@ const SECTION_LABELS: Record<StorefrontSectionType, string> = {
   NEW_ARRIVALS: 'Recién llegados',
   COLLECTIONS: 'Colecciones',
   BEST_SELLERS: 'Más vendidos',
-  SCENT_FINDER: 'Familias aromáticas',
   PROMOTION_BAND: 'Franja promocional',
   ABOUT: 'Nosotros y ubicación',
   SPECIAL_ORDER: 'Pedido especial',
@@ -84,7 +87,9 @@ export function AdminSiteEditor({
   const [meta, setMeta] = useState<AdminContentResponse | null>(null);
   const [media, setMedia] = useState<MediaAsset[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
-  const [scentFamilies, setScentFamilies] = useState<ScentFamily[]>([]);
+  const [catalogNavigation, setCatalogNavigation] = useState<CatalogNavigation>(
+    FALLBACK_CATALOG_NAVIGATION,
+  );
   const [selected, setSelected] = useState<EditorSelection>('hero');
   const [viewport, setViewport] = useState<'desktop' | 'mobile'>('desktop');
   const [previewToken, setPreviewToken] = useState('');
@@ -98,18 +103,20 @@ export function AdminSiteEditor({
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [nextContent, nextMedia, preview, nextCategories, nextScents] = await Promise.all([
+      const [nextContent, nextMedia, preview, nextCategories, nextNavigation] = await Promise.all([
         request<AdminContentResponse>('/admin/content'),
         request<{ items: MediaAsset[] }>('/admin/media?page=1&pageSize=60'),
         request<{ token: string }>('/admin/content/preview', { method: 'POST' }),
         request<Category[]>('/categories').catch(() => []),
-        request<ScentFamily[]>('/scent-families').catch(() => []),
+        request<CatalogNavigation>('/catalog/navigation')
+          .then(mergeCatalogNavigation)
+          .catch(() => FALLBACK_CATALOG_NAVIGATION),
       ]);
       setMeta(nextContent);
       setContent(nextContent.draftContent);
       setMedia(nextMedia.items);
       setCategories(nextCategories);
-      setScentFamilies(nextScents);
+      setCatalogNavigation(nextNavigation);
       setPreviewToken(preview.token);
       setDirty(false);
     } catch (error) {
@@ -219,8 +226,8 @@ export function AdminSiteEditor({
   }, [request]);
 
   const destinations = useMemo(
-    () => buildDestinationOptions(categories, scentFamilies),
-    [categories, scentFamilies],
+    () => buildDestinationOptions(categories, catalogNavigation),
+    [catalogNavigation, categories],
   );
 
   if (loading || !content) return <div className="siteEditorLoading"><LoaderCircle className="adminSpin" size={24} /><span>Cargando contenido</span></div>;
@@ -265,7 +272,7 @@ export function AdminSiteEditor({
             {selected === 'header' && <HeaderEditor content={content} destinations={destinations} media={media} onChange={change} onHeader={updateHeader} onUpload={uploadMedia} />}
             {selected === 'footer' && <FooterEditor content={content} onChange={change} onContact={updateContact} />}
             {selected === 'media' && <MediaLibrary assets={media} onArchive={async (id) => { await request(`/admin/media/${id}`, { method: 'DELETE' }); await refreshMedia(); onNotice('success', 'Imagen archivada.'); }} onUpload={uploadMedia} />}
-            {selectedSection && <SectionEditor destinations={destinations} media={media} onChange={(patch) => updateSection(selectedSection.id, patch)} onUpload={uploadMedia} scentFamilies={scentFamilies} section={selectedSection} />}
+            {selectedSection && <SectionEditor destinations={destinations} media={media} onChange={(patch) => updateSection(selectedSection.id, patch)} onUpload={uploadMedia} section={selectedSection} />}
           </section>
         </div>
 
@@ -530,17 +537,15 @@ function SectionEditor({
   media,
   onChange,
   onUpload,
-  scentFamilies,
   section,
 }: {
   destinations: DestinationOption[];
   media: MediaAsset[];
   onChange: (patch: Partial<StorefrontSection>) => void;
   onUpload: UploadMedia;
-  scentFamilies: ScentFamily[];
   section: StorefrontSection;
 }) {
-  const usesCta = !['COLLECTIONS', 'SCENT_FINDER'].includes(section.type);
+  const usesCta = section.type !== 'COLLECTIONS';
   const automaticDestination = section.type === 'ABOUT'
     ? 'Usar la ubicación configurada en Google Maps'
     : 'Ocultar el botón';
@@ -583,15 +588,6 @@ function SectionEditor({
         value={section.imageUrl}
       />
 
-      {section.type === 'SCENT_FINDER' && (
-        <ScentLinksEditor
-          destinations={destinations}
-          links={section.scentLinks ?? []}
-          onChange={(scentLinks) => onChange({ scentLinks })}
-          scentFamilies={scentFamilies}
-        />
-      )}
-
       {usesCta && (
         <>
           <div className="siteEditor__divider">Botón de la sección</div>
@@ -610,87 +606,6 @@ function SectionEditor({
         </>
       )}
     </EditorPanel>
-  );
-}
-
-function ScentLinksEditor({
-  destinations,
-  links,
-  onChange,
-  scentFamilies,
-}: {
-  destinations: DestinationOption[];
-  links: StorefrontScentLink[];
-  onChange: (links: StorefrontScentLink[]) => void;
-  scentFamilies: ScentFamily[];
-}) {
-  function update(id: string, patch: Partial<StorefrontScentLink>) {
-    onChange(links.map((item) => item.id === id ? { ...item, ...patch } : item));
-  }
-
-  function move(index: number, step: number) {
-    const nextIndex = index + step;
-    if (nextIndex < 0 || nextIndex >= links.length) return;
-    const next = [...links];
-    [next[index], next[nextIndex]] = [next[nextIndex], next[index]];
-    onChange(next);
-  }
-
-  function syncCatalog() {
-    if (!scentFamilies.length) return;
-    onChange(scentFamilies.slice(0, 8).map((scent) => ({
-      id: scent.slug,
-      label: scent.name,
-      href: `/productos?scent=${scent.slug}`,
-    })));
-  }
-
-  return (
-    <section className="siteEditor__scentEditor">
-      <header>
-        <div>
-          <span className="adminEyebrow">Accesos del bloque</span>
-          <h3>Familias que verá el cliente</h3>
-          <p>Cada fila controla uno de los ocho enlaces de la sección. Puedes cambiar su nombre, destino y orden.</p>
-        </div>
-        <button className="adminSecondaryButton" disabled={!scentFamilies.length} onClick={syncCatalog} type="button">
-          <RefreshCw size={15} /> Sincronizar catálogo
-        </button>
-      </header>
-      <div className="siteEditor__scentList">
-        {links.length === 0 && (
-          <div className="siteEditor__scentEmpty">
-            <Info size={18} />
-            <div>
-              <strong>No hay familias configuradas</strong>
-              <span>Usa “Sincronizar catálogo” para crear la lista desde las familias disponibles.</span>
-            </div>
-          </div>
-        )}
-        {links.map((link, index) => (
-          <article className="siteEditor__scentItem" key={link.id}>
-            <header>
-              <div><span>{String(index + 1).padStart(2, '0')}</span><strong>{link.label}</strong></div>
-              <div>
-                <button aria-label={`Mover ${link.label} arriba`} disabled={index === 0} onClick={() => move(index, -1)} title="Mover arriba" type="button"><ArrowUp size={14} /></button>
-                <button aria-label={`Mover ${link.label} abajo`} disabled={index === links.length - 1} onClick={() => move(index, 1)} title="Mover abajo" type="button"><ArrowDown size={14} /></button>
-                <a aria-label={`Abrir destino de ${link.label}`} href={link.href} rel="noreferrer" target="_blank" title="Probar enlace"><ExternalLink size={14} /></a>
-              </div>
-            </header>
-            <EditorField description="Es el nombre que aparecerá en la lista pública, por ejemplo “Floral”." label="Nombre visible">
-              <input maxLength={50} onChange={(event) => update(link.id, { label: event.target.value })} value={link.label} />
-            </EditorField>
-            <DestinationField
-              description="Selecciona la página o filtro que se abrirá al pulsar este nombre."
-              destinations={destinations}
-              href={link.href}
-              label="Página de destino"
-              onChange={(href) => update(link.id, { href })}
-            />
-          </article>
-        ))}
-      </div>
-    </section>
   );
 }
 
@@ -863,18 +778,46 @@ function DestinationField({
   );
 }
 
-function buildDestinationOptions(categories: Category[], scents: ScentFamily[]): DestinationOption[] {
+function buildDestinationOptions(
+  categories: Category[],
+  navigation: CatalogNavigation,
+): DestinationOption[] {
   const options: DestinationOption[] = [
     { group: 'Páginas principales', href: '/', label: 'Inicio' },
     { group: 'Páginas principales', href: '/productos', label: 'Todos los productos' },
+    { group: 'Páginas principales', href: '/inspiraciones', label: 'Inspiraciones por casa perfumera' },
+    { group: 'Páginas principales', href: '/colecciones', label: 'Colecciones por casa perfumera' },
     { group: 'Páginas principales', href: '/promociones', label: 'Promociones' },
     { group: 'Páginas principales', href: '/pedidos-especiales', label: 'Pedidos especiales' },
+    { group: 'Páginas principales', href: '/guia-de-perfumes', label: 'Guía de perfumes' },
     { group: 'Páginas principales', href: '/cuenta', label: 'Cuenta del cliente' },
     { group: 'Páginas principales', href: '/carrito', label: 'Carrito de compras' },
     { group: 'Páginas principales', href: '/#nosotros', label: 'Sección Nosotros' },
+    { group: 'Páginas principales', href: '/#contacto', label: 'Contacto, ubicación y horarios' },
     { group: 'Selecciones', href: '/productos?featured=true', label: 'Productos destacados' },
+    ...navigation.sections.map((section) => ({
+      group: 'Secciones del catálogo',
+      href: `/productos?catalogSection=${section.slug}`,
+      label: section.name,
+    })),
+    ...navigation.sections.flatMap((section) =>
+      section.lines.map((line) => ({
+        group: `Líneas · ${section.name}`,
+        href: catalogLineHref(line),
+        label: line.name,
+      })),
+    ),
+    ...navigation.sections.flatMap((section) =>
+      section.lines.flatMap((line) =>
+        (line.houses ?? []).map((house) => ({
+          group: `Casas perfumeras · ${line.name}`,
+          href: catalogLineHref(line, house.slug),
+          label: house.name,
+        })),
+      ),
+    ),
     ...PRODUCT_LINES.map((line) => ({
-      group: 'Líneas de producto',
+      group: 'Clasificación anterior',
       href: `/productos?line=${line}`,
       label: LINE_LABELS[line],
     })),
@@ -882,11 +825,6 @@ function buildDestinationOptions(categories: Category[], scents: ScentFamily[]):
       group: 'Categorías',
       href: `/productos?category=${category.slug}`,
       label: category.label,
-    })),
-    ...scents.map((scent) => ({
-      group: 'Familias aromáticas',
-      href: `/productos?scent=${scent.slug}`,
-      label: `Perfumes ${scent.name}`,
     })),
   ];
 

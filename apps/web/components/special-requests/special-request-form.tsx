@@ -10,7 +10,13 @@ import { useNotify } from '@/providers/notification-provider';
 
 type RequestResult = { publicToken: string; status: string; createdAt: string };
 
-export function SpecialRequestForm() {
+export function SpecialRequestForm({
+  initialAroma = '',
+  initialNotes = '',
+}: {
+  initialAroma?: string;
+  initialNotes?: string;
+}) {
   const { customer } = useAuth();
   const notify = useNotify();
   const [loading, setLoading] = useState(false);
@@ -61,9 +67,9 @@ export function SpecialRequestForm() {
         <label className="formField"><span>Correo</span><input defaultValue={customer?.email ?? ''} name="customerEmail" required type="email" /></label>
         <label className="formField"><span>WhatsApp</span><input defaultValue={customer?.phone ?? ''} maxLength={30} name="customerPhone" type="tel" /></label>
       </div>
-      <label className="formField"><span>Aroma o perfume</span><input maxLength={160} name="requestedAroma" placeholder="Ej. un aroma con vainilla y madera" required /></label>
+      <label className="formField"><span>Aroma o perfume</span><input defaultValue={initialAroma} maxLength={160} name="requestedAroma" placeholder="Ej. un aroma con vainilla y madera" required /></label>
       <label className="formField"><span>Línea preferida</span><select name="preferredLine" defaultValue=""><option value="">No estoy seguro</option>{(Object.entries(LINE_LABELS) as Array<[ProductLine, string]>).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
-      <label className="formField"><span>Detalles adicionales</span><textarea maxLength={1000} name="notes" placeholder="Cuéntanos dónde lo conociste, presentación o presupuesto aproximado." rows={4} /></label>
+      <label className="formField"><span>Detalles adicionales</span><textarea defaultValue={initialNotes} maxLength={1000} name="notes" placeholder="Cuéntanos dónde lo conociste, presentación o presupuesto aproximado." rows={4} /></label>
       <button className="button button--coral button--large button--wide" disabled={loading} type="submit">{loading ? <span className="buttonSpinner" /> : <>Enviar solicitud <ArrowRight aria-hidden="true" size={18} /></>}</button>
       <small className="formPrivacy">Usaremos tus datos únicamente para responder esta solicitud.</small>
     </form>

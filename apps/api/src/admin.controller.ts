@@ -30,8 +30,12 @@ import {
 } from './admin-commerce.dto';
 import { AdminCommerceService } from './admin-commerce.service';
 import {
+  CreateBrandDto,
+  CreateCategoryDto,
+  CreatePerfumeHouseDto,
   CreateProductDto,
   ReviewTransferProofDto,
+  SkuAvailabilityQueryDto,
   UpdateInventoryDto,
   UpdateProductDto,
   UpdateSpecialRequestDto,
@@ -157,6 +161,33 @@ export class AdminController {
   @Get('products')
   listProducts(@Query() query: ListAdminProductsDto) {
     return this.commerce.listProducts(query);
+  }
+
+  @Roles(UserRole.ADMIN)
+  @Get('products/sku-availability')
+  skuAvailability(@Query() query: SkuAvailabilityQueryDto) {
+    return this.admin.skuAvailability(query);
+  }
+
+  @Roles(UserRole.ADMIN)
+  @Post('brands')
+  createBrand(@Body() input: CreateBrandDto, @Req() request: AuthenticatedRequest) {
+    return this.admin.createBrand(input, request.user.userId);
+  }
+
+  @Roles(UserRole.ADMIN)
+  @Post('categories')
+  createCategory(@Body() input: CreateCategoryDto, @Req() request: AuthenticatedRequest) {
+    return this.admin.createCategory(input, request.user.userId);
+  }
+
+  @Roles(UserRole.ADMIN)
+  @Post('perfume-houses')
+  createPerfumeHouse(
+    @Body() input: CreatePerfumeHouseDto,
+    @Req() request: AuthenticatedRequest,
+  ) {
+    return this.admin.createPerfumeHouse(input, request.user.userId);
   }
 
   @Get('inventory')

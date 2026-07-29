@@ -8,7 +8,17 @@ export const metadata: Metadata = {
   alternates: { canonical: '/pedidos-especiales' },
 };
 
-export default function SpecialRequestsPage() {
+export default async function SpecialRequestsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{
+    aroma?: string;
+    casa?: string;
+    tipo?: string;
+  }>;
+}) {
+  const requested = await searchParams;
+  const isCollection = requested.tipo === 'coleccion';
   return (
     <main className="specialRequestPage">
       <section className="specialRequestHero pageWidth">
@@ -22,7 +32,14 @@ export default function SpecialRequestsPage() {
             <li><span>03</span><div><strong>Te contactamos</strong><small>Recibes respuesta y precio por correo o WhatsApp.</small></div></li>
           </ol>
         </div>
-        <SpecialRequestForm />
+        <SpecialRequestForm
+          initialAroma={requested.aroma}
+          initialNotes={
+            isCollection
+              ? `Quiero cotizar la colección completa de ${requested.casa ?? 'esta casa perfumera'} y conocer disponibilidad en 10 ml, 30 ml y 60 ml.`
+              : undefined
+          }
+        />
       </section>
     </main>
   );

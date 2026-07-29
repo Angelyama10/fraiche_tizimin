@@ -6,10 +6,11 @@ import { ProductQueryDto, SuggestionQueryDto } from './product-query.dto';
 
 const productInclude = {
   brand: true,
+  inspirationHouse: true,
   linePricingPolicy: true,
   images: { orderBy: { sortOrder: 'asc' as const } },
   categories: { include: { category: true } },
-  scentFamilies: { include: { scentFamily: true } },
+  catalogLines: { include: { catalogLine: { include: { section: true } } } },
   variants: {
     where: { isActive: true },
     include: { inventoryLevels: { where: { location: { isActive: true } } } },
@@ -36,15 +37,36 @@ export class ProductsService {
       ...(query.category
         ? { categories: { some: { category: { slug: query.category, isActive: true } } } }
         : {}),
-      ...(query.scent
-        ? { scentFamilies: { some: { scentFamily: { slug: query.scent } } } }
+      ...(query.catalogSection
+        ? {
+            catalogLines: {
+              some: {
+                catalogLine: {
+                  isActive: true,
+                  section: { slug: query.catalogSection, isActive: true },
+                },
+              },
+            },
+          }
         : {}),
+      ...(query.catalogLine
+        ? { catalogLines: { some: { catalogLine: { slug: query.catalogLine, isActive: true } } } }
+        : {}),
+      ...(query.house
+        ? { inspirationHouse: { slug: query.house, isActive: true } }
+        : {}),
+      ...(query.brand ? { brand: { slug: query.brand } } : {}),
       ...(query.q?.trim()
         ? {
             OR: [
               { name: { contains: query.q.trim(), mode: 'insensitive' } },
               { shortDescription: { contains: query.q.trim(), mode: 'insensitive' } },
               { brand: { name: { contains: query.q.trim(), mode: 'insensitive' } } },
+              {
+                inspirationHouse: {
+                  name: { contains: query.q.trim(), mode: 'insensitive' },
+                },
+              },
             ],
           }
         : {}),
@@ -90,12 +112,14 @@ export class ProductsService {
         OR: [
           { name: { contains: q, mode: 'insensitive' } },
           { brand: { name: { contains: q, mode: 'insensitive' } } },
+          { inspirationHouse: { name: { contains: q, mode: 'insensitive' } } },
         ],
       },
       select: {
         slug: true,
         name: true,
         brand: { select: { name: true } },
+        inspirationHouse: { select: { name: true } },
         images: {
           where: { isPrimary: true },
           select: { url: true, altText: true },
@@ -140,6 +164,7 @@ export class ProductsService {
       description: product.description,
       line: product.line,
       brand: product.brand,
+      inspirationHouse: product.inspirationHouse,
       isFeatured: product.isFeatured,
       isNew: product.isNew,
       seoTitle: product.seoTitle,
@@ -147,7 +172,7 @@ export class ProductsService {
       attributes: product.attributes,
       images: product.images,
       categories: product.categories.map(({ category }) => category),
-      scentFamilies: product.scentFamilies.map(({ scentFamily }) => scentFamily),
+      catalogLines: product.catalogLines.map(({ catalogLine }) => catalogLine),
       variants,
       priceRange: {
         minimumCents: prices.length ? Math.min(...prices) : null,

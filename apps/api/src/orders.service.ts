@@ -9,6 +9,7 @@ import { ConfigService } from '@nestjs/config';
 import {
   AdminNotificationType,
   CartStatus,
+  DeliveryMethod,
   OrderStatus,
   PaymentMethod,
   PaymentProvider,
@@ -17,9 +18,10 @@ import {
   ProductStatus,
   ReservationStatus,
   StockMovementType,
+  TransferProofStatus,
   UserRole,
 } from '@prisma/client';
-import { CreateOrderDto, ListCustomerOrdersDto } from './order.dto';
+import { CreateOrderDto, ListCustomerOrdersDto, UpdatePendingOrderDto } from './order.dto';
 import {
   calculatePromotionDiscount,
   customerCanUsePromotion,
@@ -80,6 +82,194 @@ export class OrdersService {
     }
 
     throw new ConflictException('No fue posible completar la orden. Intenta nuevamente.');
+  }
+
+  async updatePendingCheckout(
+    publicToken: string,
+    input: UpdatePendingOrderDto,
+    customerId: string,
+  ) {
+    this.validateDeliveryPaymentPair(input.paymentMethod, input.deliveryMethod);
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      try {
+        await this.prisma.$transaction(
+          async (transaction) => {
+            const order = await transaction.order.findFirst({
+              where: { publicToken, customerId },
+              include: {
+                payments: {
+                  include: { transferProofs: true },
+                  orderBy: { createdAt: 'desc' },
+                },
+                items: {
+                  include: { reservation: true },
+                },
+              },
+            });
+            if (!order) throw new NotFoundException('Orden no encontrada.');
+            if (order.status !== OrderStatus.PENDING_PAYMENT) {
+              throw new ConflictException('Solo puedes corregir un pedido pendiente de pago.');
+            }
+            const immutablePaymentStatuses = new Set<PaymentStatus>([
+              PaymentStatus.APPROVED,
+              PaymentStatus.IN_PROCESS,
+              PaymentStatus.REFUNDED,
+              PaymentStatus.CHARGED_BACK,
+            ]);
+            if (immutablePaymentStatuses.has(order.paymentStatus)) {
+              throw new ConflictException(
+                order.paymentStatus === PaymentStatus.IN_PROCESS
+                  ? 'El pago se esta procesando. Espera la confirmacion antes de hacer cambios.'
+                  : 'Este pedido ya no admite cambios de pago.',
+              );
+            }
+
+            const activeReservations = order.items.flatMap((item) =>
+              item.reservation?.status === ReservationStatus.ACTIVE
+                ? [item.reservation]
+                : [],
+            );
+            if (
+              !activeReservations.length ||
+              activeReservations.some((reservation) => reservation.expiresAt <= new Date())
+            ) {
+              throw new ConflictException(
+                'La reserva del pedido ya vencio. Cancela el pedido y vuelve a agregar los productos.',
+              );
+            }
+
+            const shippingAddress = await this.resolveShippingAddress(
+              transaction,
+              customerId,
+              input,
+            );
+            const paymentProvider = this.resolvePaymentProvider(input);
+            const currentPayment = order.payments.find(
+              (payment) =>
+                payment.status !== PaymentStatus.CANCELLED &&
+                payment.status !== PaymentStatus.REFUNDED &&
+                payment.status !== PaymentStatus.CHARGED_BACK,
+            );
+            const choicesChanged =
+              order.paymentMethod !== input.paymentMethod ||
+              currentPayment?.provider !== paymentProvider;
+            const maximumReservationAt = new Date(
+              order.createdAt.getTime() + reservationLifetimeMs(PaymentMethod.CASH),
+            );
+            const requestedExpiration = new Date(
+              Date.now() + reservationLifetimeMs(input.paymentMethod),
+            );
+            const currentExpiration =
+              order.expiresAt ??
+              activeReservations.reduce(
+                (earliest, reservation) =>
+                  reservation.expiresAt < earliest ? reservation.expiresAt : earliest,
+                activeReservations[0].expiresAt,
+              );
+            const expiresAt = choicesChanged
+              ? new Date(
+                  Math.min(
+                    requestedExpiration.getTime(),
+                    maximumReservationAt.getTime(),
+                  ),
+                )
+              : currentExpiration;
+
+            if (
+              choicesChanged ||
+              !currentPayment ||
+              currentPayment.status === PaymentStatus.REJECTED
+            ) {
+              const replaceablePaymentStatuses = new Set<PaymentStatus>([
+                PaymentStatus.PENDING,
+                PaymentStatus.REJECTED,
+              ]);
+              const supersededPayments = order.payments.filter((payment) =>
+                replaceablePaymentStatuses.has(payment.status),
+              );
+              if (supersededPayments.length) {
+                await transaction.payment.updateMany({
+                  where: { id: { in: supersededPayments.map((payment) => payment.id) } },
+                  data: {
+                    status: PaymentStatus.CANCELLED,
+                    statusDetail: 'payment_method_changed_by_customer',
+                  },
+                });
+                await transaction.transferProof.updateMany({
+                  where: {
+                    paymentId: { in: supersededPayments.map((payment) => payment.id) },
+                    status: TransferProofStatus.PENDING_REVIEW,
+                  },
+                  data: {
+                    status: TransferProofStatus.REJECTED,
+                    reviewedAt: new Date(),
+                    reviewNotes: 'Método de pago cambiado por el cliente.',
+                  },
+                });
+              }
+              await transaction.payment.create({
+                data: {
+                  orderId: order.id,
+                  provider: paymentProvider,
+                  method: input.paymentMethod,
+                  amountCents: order.totalCents,
+                  currency: order.currency,
+                  statusDetail: 'created_after_checkout_update',
+                },
+              });
+            }
+
+            await transaction.order.update({
+              where: { id: order.id },
+              data: {
+                paymentMethod: input.paymentMethod,
+                deliveryMethod: input.deliveryMethod,
+                shippingAddress: shippingAddress ?? Prisma.JsonNull,
+                customerNotes: input.customerNotes?.trim() || null,
+                paymentStatus: PaymentStatus.PENDING,
+                expiresAt,
+              },
+            });
+            await transaction.inventoryReservation.updateMany({
+              where: {
+                id: { in: activeReservations.map((reservation) => reservation.id) },
+                status: ReservationStatus.ACTIVE,
+              },
+              data: { expiresAt },
+            });
+            await transaction.outboxEvent.create({
+              data: {
+                type: 'ORDER_CHECKOUT_UPDATED',
+                aggregateType: 'Order',
+                aggregateId: order.id,
+                payload: {
+                  orderId: order.id,
+                  publicToken: order.publicToken,
+                  paymentMethod: input.paymentMethod,
+                  deliveryMethod: input.deliveryMethod,
+                },
+              },
+            });
+          },
+          {
+            isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+            maxWait: 5000,
+            timeout: 15000,
+          },
+        );
+        return this.getForCustomer(publicToken, customerId);
+      } catch (error) {
+        if (
+          error instanceof Prisma.PrismaClientKnownRequestError &&
+          error.code === 'P2034' &&
+          attempt < 3
+        ) {
+          continue;
+        }
+        throw error;
+      }
+    }
+    throw new ConflictException('No fue posible actualizar el pedido. Intenta nuevamente.');
   }
 
   async get(publicToken: string) {
@@ -220,6 +410,7 @@ export class OrdersService {
     idempotencyKey: string,
     customerId: string,
   ) {
+    this.validateDeliveryPaymentPair(input.paymentMethod, input.deliveryMethod);
     const existing = await transaction.order.findUnique({ where: { idempotencyKey } });
     if (existing) return existing.publicToken;
 
@@ -542,7 +733,7 @@ export class OrdersService {
     return `FTZ-${Date.now().toString(36).toUpperCase()}-${randomUUID().slice(0, 6).toUpperCase()}`;
   }
 
-  private resolvePaymentProvider(input: CreateOrderDto) {
+  private resolvePaymentProvider(input: CreateOrderDto | UpdatePendingOrderDto) {
     if (input.paymentMethod === PaymentMethod.CARD) {
       const provider = input.paymentProvider ?? PaymentProvider.MERCADO_PAGO;
       if (
@@ -629,7 +820,7 @@ export class OrdersService {
   private async resolveShippingAddress(
     transaction: Prisma.TransactionClient,
     customerId: string,
-    input: CreateOrderDto,
+    input: CreateOrderDto | UpdatePendingOrderDto,
   ): Promise<Prisma.InputJsonValue | undefined> {
     if (input.deliveryMethod === 'STORE_PICKUP') return undefined;
 
@@ -671,5 +862,19 @@ export class OrdersService {
       country: input.shippingAddress.country,
       reference: input.shippingAddress.reference,
     };
+  }
+
+  private validateDeliveryPaymentPair(
+    paymentMethod: PaymentMethod,
+    deliveryMethod: DeliveryMethod,
+  ) {
+    if (
+      paymentMethod === PaymentMethod.CASH &&
+      deliveryMethod !== DeliveryMethod.STORE_PICKUP
+    ) {
+      throw new BadRequestException(
+        'El pago en efectivo solo esta disponible para recoger en tienda.',
+      );
+    }
   }
 }

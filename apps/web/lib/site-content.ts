@@ -4,7 +4,6 @@ export const STOREFRONT_SECTION_TYPES = [
   'NEW_ARRIVALS',
   'COLLECTIONS',
   'BEST_SELLERS',
-  'SCENT_FINDER',
   'PROMOTION_BAND',
   'ABOUT',
   'SPECIAL_ORDER',
@@ -13,8 +12,6 @@ export const STOREFRONT_SECTION_TYPES = [
 export type StorefrontSectionType = (typeof STOREFRONT_SECTION_TYPES)[number];
 
 export type StorefrontLink = { label: string; href: string };
-
-export type StorefrontScentLink = StorefrontLink & { id: string };
 
 export type StorefrontSection = {
   id: string;
@@ -27,7 +24,6 @@ export type StorefrontSection = {
   imageUrl: string;
   ctaLabel: string;
   ctaHref: string;
-  scentLinks: StorefrontScentLink[];
 };
 
 export type SiteContentDocument = {
@@ -136,22 +132,12 @@ export const DEFAULT_SITE_CONTENT: SiteContentDocument = {
       mobilePromotionsLabel: 'Ver ofertas',
     },
     sections: [
-      { id: 'novedades', type: 'NEW_ARRIVALS', enabled: true, eyebrow: 'Recién llegados', title: 'Nuevas formas de dejar huella', description: 'Fragancias luminosas, intensas y difíciles de olvidar.', secondaryText: '', imageUrl: '', ctaLabel: 'Explorar catálogo', ctaHref: '/productos', scentLinks: [] },
-      { id: 'colecciones', type: 'COLLECTIONS', enabled: true, eyebrow: 'Encuentra tu línea', title: 'Una esencia para cada versión de ti', description: '', secondaryText: '', imageUrl: '', ctaLabel: '', ctaHref: '', scentLinks: [] },
-      { id: 'favoritos', type: 'BEST_SELLERS', enabled: true, eyebrow: 'Los más elegidos', title: 'Aromas que siempre reciben cumplidos', description: 'Una selección de favoritos para acertar contigo o con alguien especial.', secondaryText: '', imageUrl: '', ctaLabel: 'Ver favoritos', ctaHref: '/productos?featured=true', scentLinks: [] },
-      { id: 'familias-aromaticas', type: 'SCENT_FINDER', enabled: true, eyebrow: 'Elige por sensación', title: '¿Cómo quieres sentirte hoy?', description: 'Empieza por una familia aromática y deja que tu intuición haga el resto.', secondaryText: '', imageUrl: '', ctaLabel: '', ctaHref: '', scentLinks: [
-        { id: 'amaderado', label: 'Amaderado', href: '/productos?scent=amaderado' },
-        { id: 'arabe', label: 'Árabe', href: '/productos?scent=arabe' },
-        { id: 'citrico', label: 'Cítrico', href: '/productos?scent=citrico' },
-        { id: 'dulce', label: 'Dulce', href: '/productos?scent=dulce' },
-        { id: 'floral', label: 'Floral', href: '/productos?scent=floral' },
-        { id: 'fresco', label: 'Fresco', href: '/productos?scent=fresco' },
-        { id: 'nicho', label: 'Nicho', href: '/productos?scent=nicho' },
-        { id: 'oriental', label: 'Oriental', href: '/productos?scent=oriental' },
-      ] },
-      { id: 'oferta-mensual', type: 'PROMOTION_BAND', enabled: false, eyebrow: 'Oferta del mes', title: 'Tu primera esencia merece celebrarse', description: 'Las promociones activas aparecen en el panel flotante del inicio.', secondaryText: '', imageUrl: '/images/products/premium-oud.png', ctaLabel: 'Ver promociones', ctaHref: '/promociones', scentLinks: [] },
-      { id: 'nosotros', type: 'ABOUT', enabled: true, eyebrow: 'Nuestra historia', title: 'Una perfumería nacida para atenderte de cerca.', description: 'En Fraîche Tizimín cada aroma se recomienda escuchando primero a la persona. Seleccionamos perfumes y productos de cuidado que combinan calidad, duración y una experiencia cálida desde el primer mensaje.', secondaryText: 'Estamos construyendo una forma más fácil, transparente y bonita de encontrar tu fragancia favorita.', imageUrl: '', ctaLabel: 'Cómo llegar', ctaHref: '', scentLinks: [] },
-      { id: 'pedido-especial', type: 'SPECIAL_ORDER', enabled: true, eyebrow: '¿No está tu aroma?', title: 'Cuéntanos cuál buscas. Nosotros seguimos la pista.', description: '', secondaryText: '', imageUrl: '', ctaLabel: 'Solicitar aroma', ctaHref: '/pedidos-especiales', scentLinks: [] },
+      { id: 'novedades', type: 'NEW_ARRIVALS', enabled: true, eyebrow: 'Recién llegados', title: 'Nuevas formas de dejar huella', description: 'Fragancias luminosas, intensas y difíciles de olvidar.', secondaryText: '', imageUrl: '', ctaLabel: 'Explorar catálogo', ctaHref: '/productos' },
+      { id: 'colecciones', type: 'COLLECTIONS', enabled: true, eyebrow: 'Encuentra tu línea', title: 'Una esencia para cada versión de ti', description: '', secondaryText: '', imageUrl: '', ctaLabel: '', ctaHref: '' },
+      { id: 'favoritos', type: 'BEST_SELLERS', enabled: true, eyebrow: 'Los más elegidos', title: 'Aromas que siempre reciben cumplidos', description: 'Una selección de favoritos para acertar contigo o con alguien especial.', secondaryText: '', imageUrl: '', ctaLabel: 'Ver favoritos', ctaHref: '/productos?featured=true' },
+      { id: 'oferta-mensual', type: 'PROMOTION_BAND', enabled: false, eyebrow: 'Oferta del mes', title: 'Tu primera esencia merece celebrarse', description: 'Las promociones activas aparecen en el panel flotante del inicio.', secondaryText: '', imageUrl: '/images/products/premium-oud.png', ctaLabel: 'Ver promociones', ctaHref: '/promociones' },
+      { id: 'nosotros', type: 'ABOUT', enabled: true, eyebrow: 'Nuestra historia', title: 'Una perfumería nacida para atenderte de cerca.', description: 'En Fraîche Tizimín cada aroma se recomienda escuchando primero a la persona. Seleccionamos perfumes y productos de cuidado que combinan calidad, duración y una experiencia cálida desde el primer mensaje.', secondaryText: 'Estamos construyendo una forma más fácil, transparente y bonita de encontrar tu fragancia favorita.', imageUrl: '', ctaLabel: 'Cómo llegar', ctaHref: '' },
+      { id: 'pedido-especial', type: 'SPECIAL_ORDER', enabled: true, eyebrow: '¿No está tu aroma?', title: 'Cuéntanos cuál buscas. Nosotros seguimos la pista.', description: '', secondaryText: '', imageUrl: '', ctaLabel: 'Solicitar aroma', ctaHref: '/pedidos-especiales' },
     ],
   },
 };

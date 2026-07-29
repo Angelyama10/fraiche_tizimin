@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { PrismaPg } from '@prisma/adapter-pg';
 import {
+  CatalogAudience,
   PaymentMethod,
   PricingMode,
   Prisma,
@@ -30,7 +31,6 @@ type InventoryCatalogEntry = {
   line: ProductLine;
   brandSlug: string;
   categorySlugs: string[];
-  scentSlugs: string[];
   sku: string;
   variantName: string;
   concentrationLabel?: string;
@@ -49,6 +49,101 @@ type CategorySeed = {
   parentSlug?: string;
   sortOrder: number;
 };
+
+type CatalogSectionSeed = {
+  slug: string;
+  name: string;
+  description: string;
+  iconKey: string;
+  sortOrder: number;
+};
+
+type CatalogLineSeed = {
+  sectionSlug: string;
+  slug: string;
+  name: string;
+  description: string;
+  audience?: CatalogAudience;
+  sortOrder: number;
+  showInInspirations?: boolean;
+  inspirationGroupSlug?: string;
+  inspirationGroupName?: string;
+  inspirationSortOrder?: number;
+};
+
+const catalogSectionSeeds: CatalogSectionSeed[] = [
+  { slug: 'perfumes', name: 'Perfumes', description: 'Fragancias organizadas por línea, público y casa perfumera.', iconKey: 'spray-can', sortOrder: 10 },
+  { slug: 'brumas', name: 'Brumas', description: 'Brumas corporales ligeras para usar durante el día.', iconKey: 'sparkles', sortOrder: 20 },
+  { slug: 'cuidado-belleza', name: 'Cuidado Personal y Belleza', description: 'Higiene, belleza y cuidado diario para piel, rostro y cuerpo.', iconKey: 'heart-handshake', sortOrder: 30 },
+  { slug: 'aromas-hogar', name: 'Aromas para el Hogar', description: 'Productos para perfumar y ambientar cada espacio.', iconKey: 'house', sortOrder: 40 },
+  { slug: 'aromas-auto', name: 'Aromatizantes para Auto', description: 'Aromas diseñados para acompañarte en cada trayecto.', iconKey: 'car-front', sortOrder: 50 },
+  { slug: 'neeche-passion', name: 'Neeche Passion', description: 'Presentaciones especiales de la línea Neeche Passion.', iconKey: 'gem', sortOrder: 60 },
+  { slug: 'perfumes-bolsillo', name: 'Perfumes de Bolsillo', description: 'Formatos compactos para llevar tu aroma favorito contigo.', iconKey: 'briefcase-business', sortOrder: 70 },
+  { slug: 'colecciones', name: 'Colecciones', description: 'Colecciones completas por casa perfumera y presentación.', iconKey: 'gift', sortOrder: 80 },
+  { slug: 'infantil', name: 'Infantil', description: 'Productos y fragancias seleccionados para público infantil.', iconKey: 'baby', sortOrder: 90 },
+  { slug: 'velas', name: 'Velas', description: 'Velas aromáticas para crear ambientes especiales.', iconKey: 'flame', sortOrder: 100 },
+  { slug: 'extractos', name: 'Extractos', description: 'Extractos aromáticos concentrados.', iconKey: 'leaf', sortOrder: 110 },
+];
+
+const catalogLineSeeds: CatalogLineSeed[] = [
+  { sectionSlug: 'perfumes', slug: 'fraiche-dama', name: 'Fraiche Dama', description: 'Inspiraciones Fraiche para dama.', audience: CatalogAudience.WOMEN, sortOrder: 10, showInInspirations: true, inspirationGroupSlug: 'fraiche-dama', inspirationGroupName: 'Fraiche Dama', inspirationSortOrder: 10 },
+  { sectionSlug: 'perfumes', slug: 'fraiche-caballero', name: 'Fraiche Caballero', description: 'Inspiraciones Fraiche para caballero.', audience: CatalogAudience.MEN, sortOrder: 20, showInInspirations: true, inspirationGroupSlug: 'fraiche-caballero', inspirationGroupName: 'Fraiche Caballero', inspirationSortOrder: 20 },
+  { sectionSlug: 'perfumes', slug: 'neeche-passion-dama', name: 'Neeche Passion Dama', description: 'Aromas Neeche Passion para dama.', audience: CatalogAudience.WOMEN, sortOrder: 30 },
+  { sectionSlug: 'perfumes', slug: 'arabe-dama', name: 'Árabe Dama', description: 'Perfumes de inspiración árabe para dama.', audience: CatalogAudience.WOMEN, sortOrder: 40 },
+  { sectionSlug: 'perfumes', slug: 'neeche-passion-caballero', name: 'Neeche Passion Caballero', description: 'Aromas Neeche Passion para caballero.', audience: CatalogAudience.MEN, sortOrder: 50 },
+  { sectionSlug: 'perfumes', slug: 'arabe-caballero', name: 'Árabe Caballero', description: 'Perfumes de inspiración árabe para caballero.', audience: CatalogAudience.MEN, sortOrder: 60 },
+  { sectionSlug: 'perfumes', slug: 'neeche-passion-unisex', name: 'Neeche Passion Unisex', description: 'Aromas Neeche Passion sin género.', audience: CatalogAudience.UNISEX, sortOrder: 70 },
+  { sectionSlug: 'perfumes', slug: 'arabe-unisex', name: 'Árabe Unisex', description: 'Perfumes de inspiración árabe unisex.', audience: CatalogAudience.UNISEX, sortOrder: 80 },
+  { sectionSlug: 'perfumes', slug: 'kiibok-clasico-dama', name: "Kii'bok Exclusivo Clásico Dama", description: "Línea Kii'bok Exclusivo Clásico para dama.", audience: CatalogAudience.WOMEN, sortOrder: 90, showInInspirations: true, inspirationGroupSlug: 'kiibok-exclusivo-clasico', inspirationGroupName: "Kii'bok Exclusivo Clásico", inspirationSortOrder: 30 },
+  { sectionSlug: 'perfumes', slug: 'kiibok-clasico-caballero', name: "Kii'bok Exclusivo Clásico Caballero", description: "Línea Kii'bok Exclusivo Clásico para caballero.", audience: CatalogAudience.MEN, sortOrder: 100, showInInspirations: true, inspirationGroupSlug: 'kiibok-exclusivo-clasico', inspirationGroupName: "Kii'bok Exclusivo Clásico", inspirationSortOrder: 30 },
+  { sectionSlug: 'perfumes', slug: 'kiibok-premium-dama', name: "Kii'bok Exclusivo Premium Dama", description: "Línea Kii'bok Exclusivo Premium para dama.", audience: CatalogAudience.WOMEN, sortOrder: 110, showInInspirations: true, inspirationGroupSlug: 'kiibok-exclusivo-premium', inspirationGroupName: "Kii'bok Exclusivo Premium", inspirationSortOrder: 40 },
+  { sectionSlug: 'perfumes', slug: 'kiibok-premium-caballero', name: "Kii'bok Exclusivo Premium Caballero", description: "Línea Kii'bok Exclusivo Premium para caballero.", audience: CatalogAudience.MEN, sortOrder: 120, showInInspirations: true, inspirationGroupSlug: 'kiibok-exclusivo-premium', inspirationGroupName: "Kii'bok Exclusivo Premium", inspirationSortOrder: 40 },
+  { sectionSlug: 'perfumes', slug: 'kiibok-premium-unisex', name: "Kii'bok Exclusivo Premium Unisex", description: "Línea Kii'bok Exclusivo Premium unisex.", audience: CatalogAudience.UNISEX, sortOrder: 130, showInInspirations: true, inspirationGroupSlug: 'kiibok-exclusivo-premium', inspirationGroupName: "Kii'bok Exclusivo Premium", inspirationSortOrder: 40 },
+  { sectionSlug: 'brumas', slug: 'brumas-fraiche', name: 'Brumas Corporales Fraiche', description: 'Brumas corporales de la línea Fraiche.', sortOrder: 10 },
+  { sectionSlug: 'brumas', slug: 'brumas-arabes', name: 'Brumas Corporales Árabes', description: 'Brumas corporales de inspiración árabe.', sortOrder: 20 },
+  { sectionSlug: 'brumas', slug: 'brumas-victorias-secret', name: "Brumas Victoria's Secret", description: "Brumas corporales Victoria's Secret.", sortOrder: 30 },
+  { sectionSlug: 'cuidado-belleza', slug: 'cremas-humectantes', name: 'Cremas Humectantes', description: 'Hidratación y suavidad para la piel.', sortOrder: 10 },
+  { sectionSlug: 'cuidado-belleza', slug: 'cremas-perfumables', name: 'Cremas Humectantes Perfumables', description: 'Cremas que pueden personalizarse con aroma.', sortOrder: 20 },
+  { sectionSlug: 'cuidado-belleza', slug: 'hair-mist', name: 'Hair Mist', description: 'Brumas ligeras para perfumar el cabello.', sortOrder: 30 },
+  { sectionSlug: 'cuidado-belleza', slug: 'serums', name: 'Sérums', description: 'Tratamientos faciales concentrados.', sortOrder: 40 },
+  { sectionSlug: 'cuidado-belleza', slug: 'cosmeticos', name: 'Cosméticos', description: 'Productos de maquillaje y belleza.', sortOrder: 50 },
+  { sectionSlug: 'cuidado-belleza', slug: 'jabones', name: 'Jabones', description: 'Jabones para el cuidado diario.', sortOrder: 60 },
+  { sectionSlug: 'cuidado-belleza', slug: 'desodorantes-aerosol-fraiche', name: 'Desodorantes en Aerosol Fraiche', description: 'Desodorantes Fraiche en aerosol.', sortOrder: 70 },
+  { sectionSlug: 'cuidado-belleza', slug: 'antitranspirantes', name: 'Antitranspirantes', description: 'Protección antitranspirante para el día a día.', sortOrder: 80 },
+  { sectionSlug: 'cuidado-belleza', slug: 'desodorantes-roll-on', name: 'Desodorantes Roll-On', description: 'Desodorantes en presentación roll-on.', sortOrder: 90 },
+  { sectionSlug: 'aromas-hogar', slug: 'aromatizantes-ambientales', name: 'Aromatizantes Ambientales', description: 'Aromas para distintos espacios del hogar.', sortOrder: 10 },
+  { sectionSlug: 'aromas-hogar', slug: 'atomizadores-ambientales', name: 'Atomizadores Ambientales', description: 'Atomizadores para perfumar ambientes.', sortOrder: 20 },
+  { sectionSlug: 'aromas-hogar', slug: 'difusores-ambientales', name: 'Difusores Ambientales', description: 'Difusores de aroma para el hogar.', sortOrder: 30 },
+  { sectionSlug: 'aromas-auto', slug: 'aromatizantes-auto', name: 'Aromatizantes para Auto', description: 'Aromas para el interior del automóvil.', sortOrder: 10 },
+  { sectionSlug: 'neeche-passion', slug: 'spray-neeche-passion', name: 'Spray Neeche Passion', description: 'Sprays aromáticos de la línea Neeche Passion.', sortOrder: 10 },
+  { sectionSlug: 'perfumes-bolsillo', slug: 'perfumes-bolsillo', name: 'Perfumes de Bolsillo', description: 'Presentaciones compactas fáciles de llevar.', sortOrder: 10 },
+  { sectionSlug: 'colecciones', slug: 'coleccion-10ml', name: 'Colección 10 ml', description: 'Colecciones por casa perfumera en 10 ml.', sortOrder: 10 },
+  { sectionSlug: 'colecciones', slug: 'coleccion-30ml', name: 'Colección 30 ml', description: 'Colecciones por casa perfumera en 30 ml.', sortOrder: 20 },
+  { sectionSlug: 'colecciones', slug: 'coleccion-60ml', name: 'Colección 60 ml', description: 'Colecciones por casa perfumera en 60 ml.', sortOrder: 30 },
+  { sectionSlug: 'infantil', slug: 'infantil', name: 'Infantil', description: 'Selección infantil.', audience: CatalogAudience.KIDS, sortOrder: 10 },
+  { sectionSlug: 'velas', slug: 'velas', name: 'Velas', description: 'Velas aromáticas.', sortOrder: 10 },
+  { sectionSlug: 'extractos', slug: 'extractos', name: 'Extractos', description: 'Extractos aromáticos.', sortOrder: 10 },
+];
+
+const perfumeHouseSeeds = [
+  'Chanel',
+  'Dior',
+  'Carolina Herrera',
+  'Yves Saint Laurent',
+  'Prada',
+  'Gucci',
+  'Dolce & Gabbana',
+  'Versace',
+  'Giorgio Armani',
+  'Valentino',
+  'Burberry',
+  'Kayali',
+  'Maison Francis Kurkdjian',
+];
+
+const initialHouseLines: Record<string, string[]> = Object.fromEntries(
+  perfumeHouseSeeds.map((name) => [name, ['fraiche-dama']]),
+);
 
 const categorySeeds: CategorySeed[] = [
   {
@@ -289,6 +384,100 @@ function normalizeProductCopy(value: string) {
     .replace(/(\d+(?:[.,]\d+)?)\s*(?:gr|g)\b/gi, '$1 g');
 }
 
+function toSlug(value: string) {
+  return value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+}
+
+async function seedCatalogNavigation() {
+  const sectionIds = new Map<string, string>();
+  const lineIds = new Map<string, string>();
+
+  for (const seed of catalogSectionSeeds) {
+    const section = await prisma.catalogSection.upsert({
+      where: { slug: seed.slug },
+      update: {
+        name: seed.name,
+        description: seed.description,
+        iconKey: seed.iconKey,
+        sortOrder: seed.sortOrder,
+        isActive: true,
+      },
+      create: { ...seed, isActive: true },
+    });
+    sectionIds.set(section.slug, section.id);
+  }
+
+  for (const seed of catalogLineSeeds) {
+    const sectionId = sectionIds.get(seed.sectionSlug);
+    if (!sectionId) throw new Error(`No existe la sección ${seed.sectionSlug}.`);
+    const {
+      sectionSlug: _sectionSlug,
+      audience = CatalogAudience.GENERAL,
+      showInInspirations = false,
+      inspirationGroupSlug = null,
+      inspirationGroupName = null,
+      inspirationSortOrder = null,
+      ...line
+    } = seed;
+    const catalogLine = await prisma.catalogLine.upsert({
+      where: { slug: seed.slug },
+      update: {
+        ...line,
+        sectionId,
+        audience,
+        showInInspirations,
+        inspirationGroupSlug,
+        inspirationGroupName,
+        inspirationSortOrder,
+        isActive: true,
+      },
+      create: {
+        ...line,
+        sectionId,
+        audience,
+        showInInspirations,
+        inspirationGroupSlug,
+        inspirationGroupName,
+        inspirationSortOrder,
+        isActive: true,
+      },
+    });
+    lineIds.set(catalogLine.slug, catalogLine.id);
+  }
+
+  for (const [sortOrder, name] of perfumeHouseSeeds.entries()) {
+    const perfumeHouse = await prisma.perfumeHouse.upsert({
+      where: { slug: toSlug(name) },
+      update: { name, sortOrder, isActive: true },
+      create: { slug: toSlug(name), name, sortOrder, isActive: true },
+    });
+
+    for (const [houseLineOrder, lineSlug] of (initialHouseLines[name] ?? []).entries()) {
+      const catalogLineId = lineIds.get(lineSlug);
+      if (!catalogLineId) throw new Error(`No existe la línea ${lineSlug}.`);
+      await prisma.catalogLineHouse.upsert({
+        where: {
+          catalogLineId_perfumeHouseId: {
+            catalogLineId,
+            perfumeHouseId: perfumeHouse.id,
+          },
+        },
+        update: { sortOrder: houseLineOrder + sortOrder },
+        create: {
+          catalogLineId,
+          perfumeHouseId: perfumeHouse.id,
+          sortOrder: houseLineOrder + sortOrder,
+        },
+      });
+    }
+  }
+}
+
 async function seedCategories() {
   const categoryIds = new Map<string, string>();
   for (const seed of categorySeeds.filter((entry) => !entry.parentSlug)) {
@@ -342,7 +531,6 @@ async function seedCatalogProduct(
   locationId: string,
   brandIds: Map<string, string>,
   categoryIds: Map<string, string>,
-  scentIds: Map<string, string>,
 ) {
   const brandId = brandIds.get(entry.brandSlug);
   if (!brandId) throw new Error(`No existe la marca ${entry.brandSlug}.`);
@@ -383,18 +571,6 @@ async function seedCatalogProduct(
     data: productCategories,
     skipDuplicates: true,
   });
-
-  const productScents = entry.scentSlugs.map((slug) => {
-    const scentFamilyId = scentIds.get(slug);
-    if (!scentFamilyId) throw new Error(`No existe la familia aromática ${slug}.`);
-    return { productId: product.id, scentFamilyId };
-  });
-  if (productScents.length) {
-    await prisma.productScentFamily.createMany({
-      data: productScents,
-      skipDuplicates: true,
-    });
-  }
 
   const variant = await prisma.productVariant.upsert({
     where: { sku: entry.sku },
@@ -504,6 +680,8 @@ async function main() {
     });
   }
 
+  await seedCatalogNavigation();
+
   const brandIds = new Map<string, string>();
   for (const [slug, name] of [
     ['fraiche', 'Fraiche'],
@@ -521,24 +699,6 @@ async function main() {
   }
 
   const categoryIds = await seedCategories();
-  const scentIds = new Map<string, string>();
-  for (const [slug, name, description] of [
-    ['floral', 'Floral', 'Rosas, jazmín, violetas y flores blancas.'],
-    ['citrico', 'Cítrico', 'Bergamota, limón, naranja, mandarina y toronja.'],
-    ['amaderado', 'Amaderado', 'Cedro, sándalo, vetiver, pachulí y oud.'],
-    ['fresco', 'Fresco', 'Acordes acuáticos, verdes, limpios y ligeros.'],
-    ['dulce', 'Dulce', 'Vainilla, caramelo, miel, chocolate y notas gourmand.'],
-    ['oriental', 'Oriental', 'Ámbar, almizcle, especias e incienso.'],
-    ['nicho', 'Nicho', 'Composiciones distintivas inspiradas en perfumería nicho.'],
-    ['arabe', 'Árabe', 'Acordes intensos de oud, ámbar, especias y resinas.'],
-  ]) {
-    const scent = await prisma.scentFamily.upsert({
-      where: { slug },
-      update: { name, description },
-      create: { slug, name, description },
-    });
-    scentIds.set(scent.slug, scent.id);
-  }
 
   const location = await prisma.storeLocation.upsert({
     where: { slug: 'tizimin-centro' },
@@ -586,16 +746,21 @@ async function main() {
     data: { status: ProductStatus.ARCHIVED },
   });
 
-  const catalog = loadInventoryCatalog();
-  const batchSize = 16;
-  for (let index = 0; index < catalog.length; index += batchSize) {
-    await Promise.all(
-      catalog
-        .slice(index, index + batchSize)
-        .map((entry) =>
-          seedCatalogProduct(entry, location.id, brandIds, categoryIds, scentIds),
-        ),
-    );
+  const seedLegacyInventory = ['1', 'true', 'yes'].includes(
+    process.env.SEED_LEGACY_INVENTORY?.trim().toLowerCase() ?? '',
+  );
+  if (seedLegacyInventory) {
+    const catalog = loadInventoryCatalog();
+    const batchSize = 16;
+    for (let index = 0; index < catalog.length; index += batchSize) {
+      await Promise.all(
+        catalog
+          .slice(index, index + batchSize)
+          .map((entry) =>
+            seedCatalogProduct(entry, location.id, brandIds, categoryIds),
+          ),
+      );
+    }
   }
 
   await prisma.paymentInstruction.upsert({

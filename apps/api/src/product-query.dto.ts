@@ -25,7 +25,19 @@ export class ProductQueryDto {
 
   @IsOptional()
   @IsString()
-  scent?: string;
+  catalogSection?: string;
+
+  @IsOptional()
+  @IsString()
+  catalogLine?: string;
+
+  @IsOptional()
+  @IsString()
+  house?: string;
+
+  @IsOptional()
+  @IsString()
+  brand?: string;
 
   @IsOptional()
   @Transform(({ value }) => value === true || value === 'true')

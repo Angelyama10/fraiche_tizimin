@@ -108,7 +108,7 @@ export function ProductDetail({ product }: { product: Product }) {
           </div>
 
           <div className="productAccordions">
-            <details open><summary>El aroma <ChevronDown aria-hidden="true" size={16} /></summary><div><p>{product.description ?? product.shortDescription}</p><div className="scentChips">{product.scentFamilies.map((scent) => <Link href={`/productos?scent=${scent.slug}`} key={scent.id}>{scent.name}</Link>)}</div></div></details>
+            <details open><summary>Descripción <ChevronDown aria-hidden="true" size={16} /></summary><div><p>{product.description ?? product.shortDescription}</p></div></details>
             <details><summary>Concentración y presentación <ChevronDown aria-hidden="true" size={16} /></summary><div><p>{variant?.concentrationLabel ?? 'Concentración clásica'}{variant?.volumeMl ? ` · ${variant.volumeMl} ml` : ''}.</p></div></details>
             <details><summary>Envíos y pagos <ChevronDown aria-hidden="true" size={16} /></summary><div><p>Paga con tarjeta, link, transferencia o efectivo al recoger. El seguimiento aparece en tu cuenta cuando la guía está lista.</p><Link href="/envios-y-devoluciones">Consultar envíos, cambios y devoluciones</Link></div></details>
           </div>

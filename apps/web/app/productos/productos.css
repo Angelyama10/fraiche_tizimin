@@ -210,32 +210,6 @@
   color: var(--white);
 }
 
-.scentOptions {
-  display: flex !important;
-  flex-direction: row !important;
-  flex-wrap: wrap;
-  gap: 6px !important;
-}
-
-.scentOptions button {
-  display: inline-flex;
-  min-height: 34px;
-  align-items: center;
-  border: 1px solid var(--line-dark);
-  border-radius: 999px;
-  padding: 0 11px;
-  background: var(--white);
-  font-size: 9px;
-  gap: 4px;
-}
-
-.scentOptions button.isActive {
-  border-color: var(--emerald);
-  background: var(--mint);
-  color: var(--emerald);
-  font-weight: 800;
-}
-
 .featuredToggle {
   display: flex;
   min-height: 60px;
@@ -649,22 +623,6 @@
 
 .productAccordions details p {
   margin-bottom: 10px;
-}
-
-.scentChips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-.scentChips a {
-  border: 1px solid var(--line-dark);
-  border-radius: 999px;
-  padding: 6px 10px;
-  background: var(--white);
-  color: var(--emerald);
-  font-size: 8px;
-  font-weight: 800;
 }
 
 .relatedProducts {

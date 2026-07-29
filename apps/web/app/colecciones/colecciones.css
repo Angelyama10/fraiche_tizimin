@@ -1,0 +1,149 @@
+.collectionsPage {
+  min-height: 80svh;
+  padding-bottom: 110px;
+  background: #f8faf8;
+}
+
+.collectionsHero {
+  padding: 72px 0 64px;
+  background: var(--emerald);
+  color: var(--white);
+}
+
+.collectionsHero h1 {
+  max-width: 920px;
+  margin: 12px 0 18px;
+  font-size: clamp(49px, 7vw, 84px);
+  line-height: 0.92;
+}
+
+.collectionsHero p {
+  max-width: 650px;
+  margin: 0;
+  color: rgba(255, 255, 255, 0.76);
+  font-size: 12px;
+  line-height: 1.65;
+}
+
+.collectionsDirectory {
+  padding-top: 58px;
+}
+
+.collectionsDirectory > header {
+  display: grid;
+  padding-bottom: 32px;
+  border-bottom: 1px solid var(--line-dark);
+  gap: 20px;
+}
+
+.collectionsDirectory > header h2 {
+  max-width: 680px;
+  margin: 9px 0 0;
+  font-size: 42px;
+  line-height: 1;
+}
+
+.collectionSizes {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.collectionSizes span {
+  display: inline-flex;
+  min-height: 38px;
+  align-items: center;
+  border: 1px solid var(--line-dark);
+  border-radius: 999px;
+  padding: 0 13px;
+  background: var(--white);
+  font-size: 9px;
+  font-weight: 850;
+  gap: 6px;
+}
+
+.collectionHouses article {
+  display: grid;
+  min-height: 112px;
+  align-items: center;
+  border-bottom: 1px solid var(--line-dark);
+  padding: 18px 0;
+  grid-template-columns: 36px minmax(0, 1fr);
+  gap: 10px;
+}
+
+.collectionHouses article > span {
+  align-self: start;
+  padding-top: 8px;
+  color: var(--coral-dark);
+  font-size: 9px;
+  font-weight: 900;
+}
+
+.collectionHouses h2 {
+  margin: 0 0 9px;
+  font-size: 27px;
+}
+
+.collectionHouses nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.collectionHouses nav a {
+  border-bottom: 1px solid var(--emerald);
+  color: var(--emerald);
+  font-size: 9px;
+  font-weight: 800;
+}
+
+.collectionHouses__quote {
+  display: inline-flex;
+  min-height: 42px;
+  align-items: center;
+  justify-content: center;
+  margin: 16px 0 0 46px;
+  border: 1px solid var(--emerald);
+  padding: 0 14px;
+  font-size: 9px;
+  font-weight: 850;
+  gap: 7px;
+}
+
+.collectionsEmpty {
+  display: flex;
+  min-height: 220px;
+  align-items: center;
+  justify-content: center;
+  border-bottom: 1px solid var(--line-dark);
+  color: var(--ink-soft);
+  gap: 15px;
+}
+
+.collectionsEmpty h2 {
+  margin: 0;
+  color: var(--ink);
+  font-size: 27px;
+}
+
+.collectionsEmpty p {
+  margin: 4px 0 0;
+  font-size: 10px;
+}
+
+@media (min-width: 760px) {
+  .collectionsDirectory > header {
+    align-items: end;
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .collectionHouses article {
+    grid-template-columns: 44px minmax(0, 1fr) auto;
+  }
+
+  .collectionHouses__quote {
+    margin: 0;
+  }
+}

@@ -3,21 +3,9 @@ import {
   STOREFRONT_SECTION_TYPES,
   type SiteContentDocument,
   type StorefrontLink,
-  type StorefrontScentLink,
 } from './site-content.types';
 
 type UnknownRecord = Record<string, unknown>;
-
-const LEGACY_SCENT_LINKS: StorefrontScentLink[] = [
-  { id: 'amaderado', label: 'Amaderado', href: '/productos?scent=amaderado' },
-  { id: 'arabe', label: 'Árabe', href: '/productos?scent=arabe' },
-  { id: 'citrico', label: 'Cítrico', href: '/productos?scent=citrico' },
-  { id: 'dulce', label: 'Dulce', href: '/productos?scent=dulce' },
-  { id: 'floral', label: 'Floral', href: '/productos?scent=floral' },
-  { id: 'fresco', label: 'Fresco', href: '/productos?scent=fresco' },
-  { id: 'nicho', label: 'Nicho', href: '/productos?scent=nicho' },
-  { id: 'oriental', label: 'Oriental', href: '/productos?scent=oriental' },
-];
 
 function fail(path: string, reason: string): never {
   throw new BadRequestException(`Contenido inválido en ${path}: ${reason}.`);
@@ -66,33 +54,6 @@ function link(value: unknown, path: string, allowEmpty = false): StorefrontLink 
   const href = safeUrl(item.href, `${path}.href`, allowEmpty);
   if ((label && !href) || (!label && href)) fail(path, 'la etiqueta y el enlace deben completarse juntos');
   return { label, href };
-}
-
-function scentLinks(value: unknown, path: string, required: boolean): StorefrontScentLink[] {
-  if (value === undefined) {
-    return required ? structuredClone(LEGACY_SCENT_LINKS) : [];
-  }
-  if (!Array.isArray(value)) fail(path, 'debe ser una lista');
-  if (required && (value.length < 1 || value.length > 8)) {
-    fail(path, 'debe tener entre 1 y 8 accesos');
-  }
-  if (!required && value.length > 0) {
-    fail(path, 'sólo está disponible en Familias aromáticas');
-  }
-
-  const ids = new Set<string>();
-  return value.map((raw, index) => {
-    const item = record(raw, `${path}.${index}`);
-    const id = text(item.id, `${path}.${index}.id`, 60);
-    if (!/^[a-z0-9-]+$/.test(id)) fail(`${path}.${index}.id`, 'usa sólo minúsculas, números y guiones');
-    if (ids.has(id)) fail(`${path}.${index}.id`, 'no puede repetirse');
-    ids.add(id);
-    return {
-      id,
-      label: text(item.label, `${path}.${index}.label`, 50),
-      href: safeUrl(item.href, `${path}.${index}.href`),
-    };
-  });
 }
 
 export function validateSiteContent(input: unknown): SiteContentDocument {
@@ -156,7 +117,6 @@ export function validateSiteContent(input: unknown): SiteContentDocument {
       imageUrl: safeUrl(item.imageUrl, `home.sections.${index}.imageUrl`, true),
       ctaLabel: text(item.ctaLabel, `home.sections.${index}.ctaLabel`, 80, true),
       ctaHref: safeUrl(item.ctaHref, `home.sections.${index}.ctaHref`, true),
-      scentLinks: scentLinks(item.scentLinks, `home.sections.${index}.scentLinks`, type === 'SCENT_FINDER'),
     };
   });
 

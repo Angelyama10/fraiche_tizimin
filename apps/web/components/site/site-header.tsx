@@ -13,18 +13,19 @@ import { AnimatePresence, motion } from 'motion/react';
 import Image from 'next/image';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { apiRequest } from '@/lib/api';
+import {
+  FALLBACK_CATALOG_NAVIGATION,
+  catalogLineHref,
+  inspirationsFromNavigation,
+  mergeCatalogNavigation,
+} from '@/lib/catalog-navigation';
+import type { CatalogNavigation, CatalogSection } from '@/lib/types';
+import type { SiteContentDocument } from '@/lib/site-content';
 import { useAuth } from '@/providers/auth-provider';
 import { useCart } from '@/providers/cart-provider';
-import type { SiteContentDocument } from '@/lib/site-content';
 import { BrandIdentity } from './brand-identity';
-
-const perfumeLinks = [
-  { href: '/productos?line=DESIGNER_CLASSIC', label: 'Diseñador clásico', note: '60 ml · concentración clásica' },
-  { href: '/productos?line=DESIGNER_37', label: 'Diseñador 37%', note: 'Mayor intensidad y duración' },
-  { href: '/productos?line=NEECHE_PASSION', label: 'Neeche Passion', note: '60 ml · $350 MXN' },
-  { href: '/productos?line=PREMIUM', label: 'Premium', note: 'Nicho y árabes · $380 MXN' },
-];
 
 export function SiteHeader({
   content,
@@ -35,11 +36,12 @@ export function SiteHeader({
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [scrolled, setScrolled] = useState(false);
+  const [navigation, setNavigation] = useState<CatalogNavigation>(
+    FALLBACK_CATALOG_NAVIGATION,
+  );
   const pathname = usePathname();
   const { customer } = useAuth();
   const { cart, setDrawerOpen } = useCart();
-  const navItems = content.header.navigation;
-  const perfumeItem = navItems.find((item) => item.kind === 'PERFUME_MENU') ?? navItems[0];
 
   useEffect(() => {
     const update = () => setScrolled(window.scrollY > 18);
@@ -47,6 +49,26 @@ export function SiteHeader({
     window.addEventListener('scroll', update, { passive: true });
     return () => window.removeEventListener('scroll', update);
   }, []);
+
+  useEffect(() => {
+    void apiRequest<CatalogNavigation>('/catalog/navigation', { cache: 'no-store' })
+      .then((next) => setNavigation(mergeCatalogNavigation(next)))
+      .catch(() => setNavigation(FALLBACK_CATALOG_NAVIGATION));
+  }, []);
+
+  const perfumes = navigation.sections.find((section) => section.slug === 'perfumes');
+  const collections = navigation.sections.find((section) => section.slug === 'colecciones');
+  const exploreSections = navigation.sections.filter(
+    (section) => !['perfumes', 'colecciones'].includes(section.slug),
+  );
+  const inspirations = useMemo(
+    () => inspirationsFromNavigation(navigation).groups,
+    [navigation],
+  );
+
+  function closeMenu() {
+    setMenuOpen(false);
+  }
 
   return (
     <>
@@ -74,41 +96,60 @@ export function SiteHeader({
           </Link>
 
           <nav className="desktopNav" aria-label="Navegación principal">
+            <Link className={pathname === '/' ? 'isActive' : ''} href="/">Inicio</Link>
+            {perfumes && (
+              <CatalogDropdown
+                active={pathname === '/productos'}
+                content={content}
+                section={perfumes}
+              />
+            )}
             <div className="desktopNav__dropdown">
-              <Link className={pathname === '/productos' ? 'isActive' : ''} href={perfumeItem.href}>
-                {perfumeItem.label} <ChevronDown aria-hidden="true" size={14} />
+              <Link className={pathname === '/inspiraciones' ? 'isActive' : ''} href="/inspiraciones">
+                Inspiraciones <ChevronDown aria-hidden="true" size={14} />
               </Link>
-              <div className="desktopNav__menu">
+              <div className="desktopNav__menu desktopNav__menu--inspirations">
                 <div>
-                  <span className="menuEyebrow">{content.header.menuEyebrow}</span>
-                  {perfumeLinks.map((item) => (
-                    <Link href={item.href} key={item.href}>
-                      <strong>{item.label}</strong>
-                      <small>{item.note}</small>
+                  <span className="menuEyebrow">Explora por casa perfumera</span>
+                  {inspirations.map((group) => (
+                    <Link href={`/inspiraciones#${group.slug}`} key={group.slug}>
+                      <strong>{group.name}</strong>
+                      <small>
+                        {group.lines.length} {group.lines.length === 1 ? 'línea' : 'líneas'}
+                      </small>
                     </Link>
                   ))}
                 </div>
-                <Link className="desktopNav__feature" href={content.header.featureLink.href}>
-                  <Image
-                    alt=""
-                    aria-hidden="true"
-                    fill
-                    sizes="300px"
-                    src={content.header.featureImageUrl}
-                    unoptimized={content.header.featureImageUrl.startsWith('http')}
-                  />
-                  <span>{content.header.featureEyebrow}</span>
-                  <strong>{content.header.featureTitle}</strong>
-                  <p>{content.header.featureDescription}</p>
-                  <small>{content.header.featureLink.label}</small>
+                <Link className="desktopNav__editorial" href="/inspiraciones">
+                  <span>Casas perfumeras</span>
+                  <strong>Encuentra el aroma por su inspiración.</strong>
+                  <small>Ver todas las inspiraciones</small>
                 </Link>
               </div>
             </div>
-            {navItems.filter((item) => item.id !== perfumeItem.id).map((item) => (
-              <Link href={item.href} key={item.href}>
-                {item.label}
+            <div className="desktopNav__dropdown">
+              <Link href="/productos">
+                Explorar <ChevronDown aria-hidden="true" size={14} />
               </Link>
-            ))}
+              <div className="desktopNav__menu desktopNav__menu--catalog">
+                <div className="desktopNav__catalogGroups">
+                  <span className="menuEyebrow">Todo el catálogo</span>
+                  {exploreSections.map((section) => (
+                    <SectionGroup key={section.slug} section={section} />
+                  ))}
+                  <div className="desktopNav__catalogGroup">
+                    <Link href="/#contacto"><strong>Contacto</strong></Link>
+                    <Link href="/#contacto">WhatsApp, ubicación y horarios</Link>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <Link className={pathname === '/colecciones' ? 'isActive' : ''} href="/colecciones">
+              Colecciones
+            </Link>
+            <Link className={pathname === '/pedidos-especiales' ? 'isActive' : ''} href="/pedidos-especiales">
+              Pedido especial
+            </Link>
           </nav>
 
           <div className="headerActions">
@@ -150,7 +191,7 @@ export function SiteHeader({
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              onClick={() => setMenuOpen(false)}
+              onClick={closeMenu}
               type="button"
             />
             <motion.aside
@@ -163,27 +204,33 @@ export function SiteHeader({
             >
               <div className="mobileMenu__header">
                 <BrandIdentity compact logoAlt={content.header.logoAlt} logoUrl={content.header.logoUrl} />
-                <button aria-label="Cerrar menú" className="iconButton" onClick={() => setMenuOpen(false)} type="button">
+                <button aria-label="Cerrar menú" className="iconButton" onClick={closeMenu} type="button">
                   <X aria-hidden="true" size={20} />
                 </button>
               </div>
-              <p className="menuEyebrow">Tu próxima esencia</p>
-              <nav>
-                {navItems.map((item, index) => (
-                  <Link href={item.href} key={item.href} onClick={() => setMenuOpen(false)}>
-                    <span>{String(index + 1).padStart(2, '0')}</span>
-                    {item.label}
-                  </Link>
+              <p className="menuEyebrow">Explorar KI&apos;IBOK</p>
+              <nav className="mobileCatalogNav">
+                <Link href="/" onClick={closeMenu}>Inicio</Link>
+                {perfumes && <MobileSection onNavigate={closeMenu} section={perfumes} />}
+                <details>
+                  <summary>Inspiraciones <ChevronDown size={15} /></summary>
+                  <div>
+                    {inspirations.map((group) => (
+                      <Link href={`/inspiraciones#${group.slug}`} key={group.slug} onClick={closeMenu}>
+                        {group.name}
+                      </Link>
+                    ))}
+                  </div>
+                </details>
+                {exploreSections.map((section) => (
+                  <MobileSection key={section.slug} onNavigate={closeMenu} section={section} />
                 ))}
+                {collections && <MobileSection onNavigate={closeMenu} section={collections} />}
+                <Link href="/pedidos-especiales" onClick={closeMenu}>Pedido especial</Link>
+                <Link href="/promociones" onClick={closeMenu}>Promociones</Link>
+                <Link href="/#contacto" onClick={closeMenu}>Contacto</Link>
               </nav>
-              <div className="mobileMenu__lines">
-                {perfumeLinks.map((item) => (
-                  <Link href={item.href} key={item.href} onClick={() => setMenuOpen(false)}>
-                    {item.label}
-                  </Link>
-                ))}
-              </div>
-              <Link className="button button--dark button--wide" href="/cuenta" onClick={() => setMenuOpen(false)}>
+              <Link className="button button--dark button--wide" href="/cuenta" onClick={closeMenu}>
                 <UserRound aria-hidden="true" size={18} />
                 {customer ? `Hola, ${customer.firstName}` : 'Entrar o crear cuenta'}
               </Link>
@@ -192,5 +239,85 @@ export function SiteHeader({
         )}
       </AnimatePresence>
     </>
+  );
+}
+
+function CatalogDropdown({
+  active,
+  content,
+  section,
+}: {
+  active: boolean;
+  content: SiteContentDocument['global'];
+  section: CatalogSection;
+}) {
+  return (
+    <div className="desktopNav__dropdown">
+      <Link className={active ? 'isActive' : ''} href="/productos?catalogSection=perfumes">
+        Perfumes <ChevronDown aria-hidden="true" size={14} />
+      </Link>
+      <div className="desktopNav__menu desktopNav__menu--perfumes">
+        <div>
+          <span className="menuEyebrow">Elige tu línea</span>
+          {section.lines.map((item) => (
+            <Link href={catalogLineHref(item)} key={item.slug}>
+              <strong>{item.name}</strong>
+              <small>{item.description}</small>
+            </Link>
+          ))}
+        </div>
+        <Link className="desktopNav__feature" href={content.header.featureLink.href}>
+          <Image
+            alt=""
+            aria-hidden="true"
+            fill
+            sizes="300px"
+            src={content.header.featureImageUrl}
+            unoptimized={content.header.featureImageUrl.startsWith('http')}
+          />
+          <span>{content.header.featureEyebrow}</span>
+          <strong>{content.header.featureTitle}</strong>
+          <p>{content.header.featureDescription}</p>
+          <small>{content.header.featureLink.label}</small>
+        </Link>
+      </div>
+    </div>
+  );
+}
+
+function SectionGroup({ section }: { section: CatalogSection }) {
+  return (
+    <div className="desktopNav__catalogGroup">
+      <Link href={`/productos?catalogSection=${section.slug}`}>
+        <strong>{section.name}</strong>
+      </Link>
+      {section.lines.map((line) => (
+        <Link href={catalogLineHref(line)} key={line.slug}>{line.name}</Link>
+      ))}
+    </div>
+  );
+}
+
+function MobileSection({
+  onNavigate,
+  section,
+}: {
+  onNavigate: () => void;
+  section: CatalogSection;
+}) {
+  return (
+    <details>
+      <summary>{section.name} <ChevronDown size={15} /></summary>
+      <div>
+        <Link href={`/productos?catalogSection=${section.slug}`} onClick={onNavigate}>
+          Ver todo
+        </Link>
+        {section.lines.map((item) => (
+          <Link href={catalogLineHref(item)} key={item.slug} onClick={onNavigate}>
+            {item.name}
+          </Link>
+        ))}
+      </div>
+    </details>
   );
 }

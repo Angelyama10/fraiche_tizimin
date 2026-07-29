@@ -11,6 +11,8 @@ import {
   IsOptional,
   IsString,
   IsUrl,
+  Matches,
+  Max,
   MaxLength,
   Min,
   ValidateNested,
@@ -38,10 +40,15 @@ export class CreateProductImageDto {
 export class CreateProductVariantDto {
   @IsString()
   @IsNotEmpty()
+  @MaxLength(64)
+  @Matches(/^[A-Za-z0-9][A-Za-z0-9._-]*$/, {
+    message: 'El SKU solo permite letras, numeros, punto, guion y guion bajo.',
+  })
   sku!: string;
 
   @IsString()
   @IsNotEmpty()
+  @MaxLength(120)
   name!: string;
 
   @IsOptional()
@@ -52,6 +59,7 @@ export class CreateProductVariantDto {
   @Type(() => Number)
   @IsNumber({ maxDecimalPlaces: 2 })
   @Min(0)
+  @Max(100)
   concentrationPercent?: number;
 
   @IsOptional()
@@ -87,20 +95,26 @@ export class CreateProductVariantDto {
 export class CreateProductDto {
   @IsString()
   @IsNotEmpty()
+  @MaxLength(160)
+  @Matches(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, {
+    message: 'El slug solo permite minusculas, numeros y guiones.',
+  })
   slug!: string;
 
   @IsString()
   @IsNotEmpty()
+  @MaxLength(180)
   name!: string;
 
-  @IsOptional()
   @IsString()
+  @IsNotEmpty()
   @MaxLength(240)
-  shortDescription?: string;
+  shortDescription!: string;
 
-  @IsOptional()
   @IsString()
-  description?: string;
+  @IsNotEmpty()
+  @MaxLength(4000)
+  description!: string;
 
   @IsOptional()
   @IsString()
@@ -119,9 +133,9 @@ export class CreateProductDto {
   @IsEnum(ProductStatus)
   status?: ProductStatus;
 
-  @IsOptional()
   @IsString()
-  brandSlug?: string;
+  @IsNotEmpty()
+  brandSlug!: string;
 
   @IsArray()
   @ArrayMinSize(1)
@@ -129,8 +143,14 @@ export class CreateProductDto {
   categorySlugs!: string[];
 
   @IsArray()
+  @ArrayMinSize(1)
   @IsString({ each: true })
-  scentSlugs!: string[];
+  catalogLineSlugs!: string[];
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  inspirationHouseSlug?: string;
 
   @IsOptional()
   @IsBoolean()
@@ -157,15 +177,23 @@ export class UpdateProductDto {
   @IsOptional()
   @IsString()
   @IsNotEmpty()
+  @MaxLength(180)
   name?: string;
 
   @IsOptional()
   @IsString()
+  @MaxLength(240)
   shortDescription?: string;
 
   @IsOptional()
   @IsString()
+  @MaxLength(4000)
   description?: string;
+
+  @IsOptional()
+  @IsString()
+  @IsNotEmpty()
+  brandSlug?: string;
 
   @IsOptional()
   @IsEnum(ProductStatus)
@@ -197,8 +225,14 @@ export class UpdateProductDto {
 
   @IsOptional()
   @IsArray()
+  @ArrayMinSize(1)
   @IsString({ each: true })
-  scentSlugs?: string[];
+  catalogLineSlugs?: string[];
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  inspirationHouseSlug?: string | null;
 
   @IsOptional()
   @IsArray()
@@ -206,6 +240,72 @@ export class UpdateProductDto {
   @ValidateNested({ each: true })
   @Type(() => CreateProductImageDto)
   images?: CreateProductImageDto[];
+}
+
+export class CreateBrandDto {
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(120)
+  name!: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  @Matches(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, {
+    message: 'El slug solo permite minusculas, numeros y guiones.',
+  })
+  slug?: string;
+}
+
+export class CreatePerfumeHouseDto {
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(120)
+  name!: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  @Matches(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, {
+    message: 'El slug solo permite minusculas, numeros y guiones.',
+  })
+  slug?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  description?: string;
+}
+
+export class CreateCategoryDto {
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(120)
+  name!: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(120)
+  @Matches(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, {
+    message: 'El slug solo permite minusculas, numeros y guiones.',
+  })
+  slug?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  description?: string;
+
+  @IsOptional()
+  @IsString()
+  parentSlug?: string;
+}
+
+export class SkuAvailabilityQueryDto {
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(64)
+  sku!: string;
 }
 
 export class UpdateVariantDto {

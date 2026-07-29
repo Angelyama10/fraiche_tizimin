@@ -17,6 +17,7 @@ import { DeliveryMethod, PaymentMethod, PaymentProvider } from '@prisma/client';
 export class ShippingAddressDto {
   @IsString()
   @IsNotEmpty()
+  @MaxLength(120)
   recipientName!: string;
 
   @IsString()
@@ -26,42 +27,52 @@ export class ShippingAddressDto {
 
   @IsString()
   @IsNotEmpty()
+  @MaxLength(160)
   street!: string;
 
   @IsString()
   @IsNotEmpty()
+  @MaxLength(20)
   exteriorNumber!: string;
 
   @IsOptional()
   @IsString()
+  @MaxLength(20)
   interiorNumber?: string;
 
   @IsString()
   @IsNotEmpty()
+  @MaxLength(100)
   neighborhood!: string;
 
   @IsString()
   @IsNotEmpty()
+  @MaxLength(100)
   city!: string;
 
   @IsOptional()
   @IsString()
+  @MaxLength(100)
   municipality?: string;
 
   @IsString()
   @IsNotEmpty()
+  @MaxLength(100)
   state!: string;
 
   @IsString()
   @IsNotEmpty()
+  @MaxLength(10)
   postalCode!: string;
 
   @IsString()
   @IsNotEmpty()
+  @MaxLength(2)
   country = 'MX';
 
   @IsOptional()
   @IsString()
+  @MaxLength(300)
   reference?: string;
 }
 
@@ -95,6 +106,36 @@ export class CreateOrderDto {
   @IsOptional()
   @IsString()
   promotionCode?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  customerNotes?: string;
+}
+
+export class UpdatePendingOrderDto {
+  @IsEnum(PaymentMethod)
+  paymentMethod!: PaymentMethod;
+
+  @IsOptional()
+  @IsEnum(PaymentProvider)
+  paymentProvider?: PaymentProvider;
+
+  @IsEnum(DeliveryMethod)
+  deliveryMethod!: DeliveryMethod;
+
+  @IsOptional()
+  @IsString()
+  shippingAddressId?: string;
+
+  @ValidateIf(
+    (input: UpdatePendingOrderDto) =>
+      input.deliveryMethod !== DeliveryMethod.STORE_PICKUP && !input.shippingAddressId,
+  )
+  @IsObject()
+  @ValidateNested()
+  @Type(() => ShippingAddressDto)
+  shippingAddress?: ShippingAddressDto;
 
   @IsOptional()
   @IsString()

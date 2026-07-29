@@ -37,11 +37,62 @@ export type Category = {
   children?: Category[];
 };
 
-export type ScentFamily = {
+export type Brand = {
+  id: string;
+  slug: string;
+  name: string;
+};
+
+export type CatalogAudience = 'GENERAL' | 'WOMEN' | 'MEN' | 'UNISEX' | 'KIDS';
+
+export type PerfumeHouse = {
   id: string;
   slug: string;
   name: string;
   description?: string | null;
+  sortOrder?: number;
+  productCount?: number;
+};
+
+export type CatalogLine = {
+  id: string;
+  slug: string;
+  name: string;
+  description?: string | null;
+  audience: CatalogAudience;
+  sortOrder: number;
+  showInInspirations: boolean;
+  inspirationGroupSlug?: string | null;
+  inspirationGroupName?: string | null;
+  inspirationSortOrder?: number | null;
+  productCount?: number;
+  houses?: PerfumeHouse[];
+  section?: Omit<CatalogSection, 'lines'>;
+};
+
+export type CatalogSection = {
+  id: string;
+  slug: string;
+  name: string;
+  description?: string | null;
+  iconKey?: string | null;
+  sortOrder: number;
+  lines: CatalogLine[];
+};
+
+export type CatalogNavigation = {
+  sections: CatalogSection[];
+};
+
+export type InspirationGroup = {
+  slug: string;
+  name: string;
+  sortOrder: number;
+  lines: CatalogLine[];
+};
+
+export type InspirationsResponse = {
+  groups: InspirationGroup[];
 };
 
 export type Product = {
@@ -52,6 +103,8 @@ export type Product = {
   description: string | null;
   line: ProductLine;
   brand?: { id?: string; name: string; slug?: string } | null;
+  inspirationHouse?: PerfumeHouse | null;
+  catalogLines?: CatalogLine[];
   isFeatured: boolean;
   isNew: boolean;
   seoTitle?: string | null;
@@ -59,7 +112,6 @@ export type Product = {
   attributes?: Record<string, unknown> | null;
   images: ProductImage[];
   categories: Category[];
-  scentFamilies: ScentFamily[];
   variants: ProductVariant[];
   priceRange: {
     minimumCents: number | null;
@@ -77,6 +129,7 @@ export type ProductSuggestion = {
   slug: string;
   name: string;
   brand?: { name: string } | null;
+  inspirationHouse?: { name: string } | null;
   images: ProductImage[];
 };
 

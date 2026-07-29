@@ -2,7 +2,6 @@ export const STOREFRONT_SECTION_TYPES = [
   'NEW_ARRIVALS',
   'COLLECTIONS',
   'BEST_SELLERS',
-  'SCENT_FINDER',
   'PROMOTION_BAND',
   'ABOUT',
   'SPECIAL_ORDER',
@@ -13,10 +12,6 @@ export type StorefrontSectionType = (typeof STOREFRONT_SECTION_TYPES)[number];
 export type StorefrontLink = {
   label: string;
   href: string;
-};
-
-export type StorefrontScentLink = StorefrontLink & {
-  id: string;
 };
 
 export type StorefrontNavigationItem = StorefrontLink & {
@@ -35,7 +30,6 @@ export type StorefrontSection = {
   imageUrl: string;
   ctaLabel: string;
   ctaHref: string;
-  scentLinks: StorefrontScentLink[];
 };
 
 export type SiteContentDocument = {

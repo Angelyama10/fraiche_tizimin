@@ -38,7 +38,6 @@
   object-fit: cover;
 }
 
-.scentFinder .cmsSection__background::after,
 .specialOrderBand .cmsSection__background::after {
   background: rgba(8, 51, 43, 0.78);
 }
@@ -880,67 +879,6 @@
   background: var(--white);
 }
 
-.scentFinder {
-  background: var(--emerald);
-  color: var(--white);
-}
-
-.scentFinder__inner {
-  display: grid;
-  gap: 40px;
-}
-
-.scentFinder h2 {
-  max-width: 560px;
-  margin: 10px 0 16px;
-  font-size: 44px;
-  line-height: 0.92;
-}
-
-.scentFinder p {
-  max-width: 490px;
-  margin: 0;
-  color: rgba(255, 255, 255, 0.66);
-  font-size: 12px;
-}
-
-.scentFinder__links {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-}
-
-.scentFinder__links a {
-  display: grid;
-  min-height: 62px;
-  align-items: center;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.2);
-  padding: 0 5px;
-  font-family: var(--font-display), var(--font-display-fallback);
-  font-size: 20px;
-  grid-template-columns: 26px 1fr auto;
-}
-
-.scentFinder__links a:nth-child(odd) {
-  border-right: 1px solid rgba(255, 255, 255, 0.2);
-  padding-right: 12px;
-}
-
-.scentFinder__links a:nth-child(even) {
-  padding-left: 12px;
-}
-
-.scentFinder__links a span {
-  color: var(--aqua);
-  font-family: var(--font-body), var(--font-body-fallback);
-  font-size: 8px;
-  font-weight: 800;
-}
-
-.scentFinder__links a:hover {
-  background: rgba(255, 255, 255, 0.06);
-  color: var(--coral);
-}
-
 .offerBand {
   padding-block: 0;
   background: var(--coral);
@@ -1274,20 +1212,6 @@
 
   .lineCollection__grid {
     grid-auto-columns: 44vw;
-  }
-
-  .scentFinder__inner {
-    grid-template-columns: 0.9fr 1.1fr;
-    gap: 80px;
-  }
-
-  .scentFinder h2 {
-    font-size: 56px;
-  }
-
-  .scentFinder__links a {
-    min-height: 74px;
-    font-size: 24px;
   }
 
   .offerBand__inner {

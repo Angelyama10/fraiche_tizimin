@@ -11,6 +11,7 @@ import {
 import { ConfigService } from '@nestjs/config';
 import {
   OrderStatus,
+  Payment,
   PaymentMethod,
   PaymentProvider,
   PaymentStatus,
@@ -43,6 +44,10 @@ type MercadoPagoPayment = {
   external_reference?: string;
   transaction_amount: number;
   currency_id: string;
+  metadata?: {
+    payment_id?: string;
+    paymentId?: string;
+  };
 };
 
 type CardOrder = Prisma.OrderGetPayload<{
@@ -100,7 +105,10 @@ export class PaymentsService {
   async createMercadoPagoPreference(orderToken: string, customerId: string) {
     const order = await this.prisma.order.findFirst({
       where: { publicToken: orderToken, customerId },
-      include: { items: true, payments: true },
+      include: {
+        items: true,
+        payments: { orderBy: { createdAt: 'desc' } },
+      },
     });
     if (!order) throw new NotFoundException('Orden no encontrada.');
     if (order.paymentMethod !== PaymentMethod.PAYMENT_LINK) {
@@ -111,7 +119,10 @@ export class PaymentsService {
     }
 
     const payment = order.payments.find(
-      (entry) => entry.provider === PaymentProvider.MERCADO_PAGO,
+      (entry) =>
+        entry.provider === PaymentProvider.MERCADO_PAGO &&
+        entry.method === PaymentMethod.PAYMENT_LINK &&
+        !this.isSupersededPaymentStatus(entry.status),
     );
     if (!payment) throw new NotFoundException('Registro de pago no encontrado.');
     if (payment.checkoutUrl) {
@@ -147,6 +158,7 @@ export class PaymentsService {
           phone: { number: order.customerPhone },
         },
         external_reference: order.publicToken,
+        metadata: { payment_id: payment.id },
         notification_url: `${publicApiUrl}/api/v1/payments/mercado-pago/webhook`,
         back_urls: {
           success: `${webAppUrl}/pago/exito?order=${order.publicToken}`,
@@ -209,6 +221,7 @@ export class PaymentsService {
           identification: input.payer.identification,
         },
         external_reference: order.publicToken,
+        metadata: { payment_id: payment.id },
         notification_url: `${publicApiUrl}/api/v1/payments/mercado-pago/webhook`,
         statement_descriptor: 'KIIBOK',
       }),
@@ -448,7 +461,7 @@ export class PaymentsService {
   ) {
     const order = await this.prisma.order.findFirst({
       where: { publicToken: orderToken, customerId },
-      include: { payments: true },
+      include: { payments: { orderBy: { createdAt: 'desc' } } },
     });
     if (!order || order.paymentMethod !== PaymentMethod.BANK_TRANSFER) {
       throw new NotFoundException('Orden de transferencia no encontrada.');
@@ -457,7 +470,11 @@ export class PaymentsService {
       throw new BadRequestException('El comprobante no pertenece a esta orden.');
     }
     const privateStorageUrl = this.requireConfig('STORAGE_PRIVATE_URL').replace(/\/$/, '');
-    const payment = order.payments.find((entry) => entry.method === PaymentMethod.BANK_TRANSFER);
+    const payment = order.payments.find(
+      (entry) =>
+        entry.method === PaymentMethod.BANK_TRANSFER &&
+        !this.isSupersededPaymentStatus(entry.status),
+    );
     if (!payment) throw new NotFoundException('Pago de transferencia no encontrado.');
 
     return this.prisma.$transaction(async (transaction) => {
@@ -525,12 +542,16 @@ export class PaymentsService {
       async (transaction) => {
         const order = await transaction.order.findUnique({
           where: { publicToken: orderToken },
-          include: { payments: true },
+          include: { payments: { orderBy: { createdAt: 'desc' } } },
         });
         if (!order || order.paymentMethod !== PaymentMethod.CASH) {
           throw new NotFoundException('Orden de efectivo no encontrada.');
         }
-        const payment = order.payments.find((entry) => entry.method === PaymentMethod.CASH);
+        const payment = order.payments.find(
+          (entry) =>
+            entry.method === PaymentMethod.CASH &&
+            !this.isSupersededPaymentStatus(entry.status),
+        );
         if (!payment) throw new NotFoundException('Pago en efectivo no encontrado.');
         await this.confirmOrderPayment(transaction, order.id, payment.id);
       },
@@ -557,33 +578,48 @@ export class PaymentsService {
     }
     const order = await this.prisma.order.findUnique({
       where: { publicToken: paymentData.external_reference },
-      include: { payments: true },
+      include: { payments: { orderBy: { createdAt: 'desc' } } },
     });
     if (!order) throw new NotFoundException('La orden del pago no existe.');
+    const payment = this.mercadoPagoPaymentAttempt(order.payments, paymentData);
     if (
       Math.round(paymentData.transaction_amount * 100) !== order.totalCents ||
-      paymentData.currency_id !== order.currency
+      paymentData.currency_id !== order.currency ||
+      payment.amountCents !== order.totalCents ||
+      payment.currency !== order.currency
     ) {
       throw new ConflictException('El monto o la moneda del pago no coincide con la orden.');
     }
 
     const mappedStatus = this.mapMercadoPagoStatus(paymentData.status);
+    if (this.paymentAttemptWasSuperseded(order.payments, payment.id)) {
+      return this.handleSupersededMercadoPagoPayment(order.id, payment.id, paymentData, mappedStatus);
+    }
     if (mappedStatus === PaymentStatus.APPROVED) {
       const reservationState = await this.orderReservationState(order.id);
       if (reservationState === 'FINALIZED') return PaymentStatus.APPROVED;
       if (reservationState === 'INACTIVE') {
-        await this.refundLateMercadoPagoPayment(order.id, String(paymentData.id));
+        await this.refundLateMercadoPagoPayment(
+          order.id,
+          payment.id,
+          String(paymentData.id),
+          false,
+        );
         return PaymentStatus.REFUNDED;
       }
     }
 
     try {
-      await this.prisma.$transaction(
+      const outcome = await this.prisma.$transaction(
         async (transaction) => {
-          const payment = order.payments.find(
-            (entry) => entry.provider === PaymentProvider.MERCADO_PAGO,
-          );
-          if (!payment) throw new NotFoundException('Registro de pago no encontrado.');
+          const currentOrder = await transaction.order.findUnique({
+            where: { id: order.id },
+            include: { payments: { orderBy: { createdAt: 'desc' } } },
+          });
+          if (!currentOrder) throw new NotFoundException('La orden del pago no existe.');
+          if (this.paymentAttemptWasSuperseded(currentOrder.payments, payment.id)) {
+            return 'SUPERSEDED' as const;
+          }
 
           await transaction.payment.update({
             where: { id: payment.id },
@@ -598,24 +634,49 @@ export class PaymentsService {
 
           if (
             mappedStatus === PaymentStatus.APPROVED &&
-            order.paymentStatus !== PaymentStatus.APPROVED
+            currentOrder.paymentStatus !== PaymentStatus.APPROVED
           ) {
             await this.confirmOrderPayment(transaction, order.id, payment.id);
-          } else if (order.paymentStatus !== PaymentStatus.APPROVED) {
+          } else if (currentOrder.paymentStatus !== PaymentStatus.APPROVED) {
             await transaction.order.update({
               where: { id: order.id },
               data: { paymentStatus: mappedStatus },
             });
           }
+          return 'APPLIED' as const;
         },
         { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
       );
+      if (outcome === 'SUPERSEDED') {
+        return this.handleSupersededMercadoPagoPayment(
+          order.id,
+          payment.id,
+          paymentData,
+          mappedStatus,
+        );
+      }
     } catch (error) {
       if (mappedStatus === PaymentStatus.APPROVED) {
+        const latestPayment = await this.prisma.payment.findUnique({
+          where: { id: payment.id },
+        });
+        if (latestPayment && this.isSupersededPaymentStatus(latestPayment.status)) {
+          return this.handleSupersededMercadoPagoPayment(
+            order.id,
+            payment.id,
+            paymentData,
+            mappedStatus,
+          );
+        }
         const reservationState = await this.orderReservationState(order.id);
         if (reservationState === 'FINALIZED') return PaymentStatus.APPROVED;
         if (reservationState === 'INACTIVE') {
-          await this.refundLateMercadoPagoPayment(order.id, String(paymentData.id));
+          await this.refundLateMercadoPagoPayment(
+            order.id,
+            payment.id,
+            String(paymentData.id),
+            false,
+          );
           return PaymentStatus.REFUNDED;
         }
       }
@@ -630,12 +691,15 @@ export class PaymentsService {
       where: orderToken
         ? { publicToken: orderToken }
         : { payments: { some: { providerPaymentId: intent.id } } },
-      include: { payments: true },
+      include: { payments: { orderBy: { createdAt: 'desc' } } },
     });
     if (!order) throw new NotFoundException('La orden del pago de Stripe no existe.');
+    const payment = this.stripePaymentAttempt(order.payments, intent);
     if (
       intent.amount !== order.totalCents ||
-      intent.currency.toUpperCase() !== order.currency
+      intent.currency.toUpperCase() !== order.currency ||
+      payment.amountCents !== order.totalCents ||
+      payment.currency !== order.currency
     ) {
       throw new ConflictException('El monto o la moneda de Stripe no coincide con la orden.');
     }
@@ -644,22 +708,29 @@ export class PaymentsService {
     }
 
     const mappedStatus = this.mapStripeStatus(intent.status);
+    if (this.paymentAttemptWasSuperseded(order.payments, payment.id)) {
+      return this.handleSupersededStripePayment(order.id, payment.id, intent, mappedStatus);
+    }
     if (mappedStatus === PaymentStatus.APPROVED) {
       const reservationState = await this.orderReservationState(order.id);
       if (reservationState === 'FINALIZED') return PaymentStatus.APPROVED;
       if (reservationState === 'INACTIVE') {
-        await this.refundLateStripePayment(order.id, intent.id);
+        await this.refundLateStripePayment(order.id, payment.id, intent.id, false);
         return PaymentStatus.REFUNDED;
       }
     }
 
     try {
-      await this.prisma.$transaction(
+      const outcome = await this.prisma.$transaction(
         async (transaction) => {
-          const payment = order.payments.find(
-            (entry) => entry.provider === PaymentProvider.STRIPE,
-          );
-          if (!payment) throw new NotFoundException('Registro de Stripe no encontrado.');
+          const currentOrder = await transaction.order.findUnique({
+            where: { id: order.id },
+            include: { payments: { orderBy: { createdAt: 'desc' } } },
+          });
+          if (!currentOrder) throw new NotFoundException('La orden del pago no existe.');
+          if (this.paymentAttemptWasSuperseded(currentOrder.payments, payment.id)) {
+            return 'SUPERSEDED' as const;
+          }
 
           await transaction.payment.update({
             where: { id: payment.id },
@@ -673,30 +744,198 @@ export class PaymentsService {
           });
           if (
             mappedStatus === PaymentStatus.APPROVED &&
-            order.paymentStatus !== PaymentStatus.APPROVED
+            currentOrder.paymentStatus !== PaymentStatus.APPROVED
           ) {
             await this.confirmOrderPayment(transaction, order.id, payment.id);
-          } else if (order.paymentStatus !== PaymentStatus.APPROVED) {
+          } else if (currentOrder.paymentStatus !== PaymentStatus.APPROVED) {
             await transaction.order.update({
               where: { id: order.id },
               data: { paymentStatus: mappedStatus },
             });
           }
+          return 'APPLIED' as const;
         },
         { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
       );
+      if (outcome === 'SUPERSEDED') {
+        return this.handleSupersededStripePayment(order.id, payment.id, intent, mappedStatus);
+      }
     } catch (error) {
       if (mappedStatus === PaymentStatus.APPROVED) {
+        const latestPayment = await this.prisma.payment.findUnique({
+          where: { id: payment.id },
+        });
+        if (latestPayment && this.isSupersededPaymentStatus(latestPayment.status)) {
+          return this.handleSupersededStripePayment(
+            order.id,
+            payment.id,
+            intent,
+            mappedStatus,
+          );
+        }
         const reservationState = await this.orderReservationState(order.id);
         if (reservationState === 'FINALIZED') return PaymentStatus.APPROVED;
         if (reservationState === 'INACTIVE') {
-          await this.refundLateStripePayment(order.id, intent.id);
+          await this.refundLateStripePayment(order.id, payment.id, intent.id, false);
           return PaymentStatus.REFUNDED;
         }
       }
       throw error;
     }
     return mappedStatus;
+  }
+
+  private mercadoPagoPaymentAttempt(
+    payments: Payment[],
+    paymentData: MercadoPagoPayment,
+  ) {
+    const metadataPaymentId =
+      paymentData.metadata?.payment_id ?? paymentData.metadata?.paymentId;
+    if (metadataPaymentId) {
+      const payment = payments.find(
+        (entry) =>
+          entry.id === metadataPaymentId &&
+          entry.provider === PaymentProvider.MERCADO_PAGO,
+      );
+      if (!payment) {
+        throw new ConflictException(
+          'El intento indicado por Mercado Pago no pertenece a esta orden.',
+        );
+      }
+      return payment;
+    }
+
+    const providerPaymentId = String(paymentData.id);
+    const existing = payments.find(
+      (entry) =>
+        entry.provider === PaymentProvider.MERCADO_PAGO &&
+        entry.providerPaymentId === providerPaymentId,
+    );
+    if (existing) return existing;
+
+    const candidates = payments.filter(
+      (entry) => entry.provider === PaymentProvider.MERCADO_PAGO,
+    );
+    if (candidates.length === 1) return candidates[0];
+    throw new ConflictException(
+      'No fue posible identificar de forma segura el intento de Mercado Pago.',
+    );
+  }
+
+  private stripePaymentAttempt(payments: Payment[], intent: Stripe.PaymentIntent) {
+    const metadataPaymentId = intent.metadata.paymentId;
+    if (metadataPaymentId) {
+      const payment = payments.find(
+        (entry) =>
+          entry.id === metadataPaymentId &&
+          entry.provider === PaymentProvider.STRIPE,
+      );
+      if (!payment) {
+        throw new ConflictException(
+          'El intento indicado por Stripe no pertenece a esta orden.',
+        );
+      }
+      return payment;
+    }
+
+    const existing = payments.find(
+      (entry) =>
+        entry.provider === PaymentProvider.STRIPE &&
+        entry.providerPaymentId === intent.id,
+    );
+    if (existing) return existing;
+
+    const candidates = payments.filter(
+      (entry) => entry.provider === PaymentProvider.STRIPE,
+    );
+    if (candidates.length === 1) return candidates[0];
+    throw new ConflictException(
+      'No fue posible identificar de forma segura el intento de Stripe.',
+    );
+  }
+
+  private paymentAttemptWasSuperseded(payments: Payment[], paymentId: string) {
+    const selected = payments.find((entry) => entry.id === paymentId);
+    if (!selected || this.isSupersededPaymentStatus(selected.status)) return true;
+    const current = payments.find(
+      (entry) => !this.isSupersededPaymentStatus(entry.status),
+    );
+    return !current || current.id !== paymentId;
+  }
+
+  private async handleSupersededMercadoPagoPayment(
+    orderId: string,
+    paymentId: string,
+    paymentData: MercadoPagoPayment,
+    mappedStatus: PaymentStatus,
+  ) {
+    if (mappedStatus === PaymentStatus.APPROVED) {
+      await this.refundLateMercadoPagoPayment(
+        orderId,
+        paymentId,
+        String(paymentData.id),
+        true,
+      );
+      return PaymentStatus.REFUNDED;
+    }
+    await this.recordSupersededProviderState(
+      paymentId,
+      String(paymentData.id),
+      mappedStatus,
+      paymentData.status_detail ?? paymentData.status,
+      paymentData as Prisma.InputJsonValue,
+    );
+    return mappedStatus === PaymentStatus.REFUNDED ||
+      mappedStatus === PaymentStatus.CHARGED_BACK
+      ? mappedStatus
+      : PaymentStatus.CANCELLED;
+  }
+
+  private async handleSupersededStripePayment(
+    orderId: string,
+    paymentId: string,
+    intent: Stripe.PaymentIntent,
+    mappedStatus: PaymentStatus,
+  ) {
+    if (mappedStatus === PaymentStatus.APPROVED) {
+      await this.refundLateStripePayment(orderId, paymentId, intent.id, true);
+      return PaymentStatus.REFUNDED;
+    }
+    await this.recordSupersededProviderState(
+      paymentId,
+      intent.id,
+      mappedStatus,
+      intent.last_payment_error?.code ?? intent.status,
+      intent as unknown as Prisma.InputJsonValue,
+    );
+    return mappedStatus === PaymentStatus.REFUNDED ||
+      mappedStatus === PaymentStatus.CHARGED_BACK
+      ? mappedStatus
+      : PaymentStatus.CANCELLED;
+  }
+
+  private async recordSupersededProviderState(
+    paymentId: string,
+    providerPaymentId: string,
+    providerStatus: PaymentStatus,
+    providerDetail: string,
+    providerResponse: Prisma.InputJsonValue,
+  ) {
+    const status =
+      providerStatus === PaymentStatus.REFUNDED ||
+      providerStatus === PaymentStatus.CHARGED_BACK
+        ? providerStatus
+        : PaymentStatus.CANCELLED;
+    await this.prisma.payment.update({
+      where: { id: paymentId },
+      data: {
+        status,
+        providerPaymentId,
+        statusDetail: `superseded_attempt:${providerDetail}`.slice(0, 255),
+        providerResponse,
+        approvedAt: null,
+      },
+    });
   }
 
   private async orderReservationState(orderId: string): Promise<OrderReservationState> {
@@ -738,11 +977,20 @@ export class PaymentsService {
     return 'ACTIVE';
   }
 
-  private async refundLateMercadoPagoPayment(orderId: string, providerPaymentId: string) {
-    const payment = await this.prisma.payment.findFirst({
-      where: { orderId, provider: PaymentProvider.MERCADO_PAGO },
-    });
-    if (!payment) throw new NotFoundException('Registro de pago no encontrado.');
+  private async refundLateMercadoPagoPayment(
+    orderId: string,
+    paymentId: string,
+    providerPaymentId: string,
+    preserveOrder: boolean,
+  ) {
+    const payment = await this.prisma.payment.findUnique({ where: { id: paymentId } });
+    if (
+      !payment ||
+      payment.orderId !== orderId ||
+      payment.provider !== PaymentProvider.MERCADO_PAGO
+    ) {
+      throw new NotFoundException('Registro de pago no encontrado.');
+    }
     if (payment.status === PaymentStatus.REFUNDED) return;
 
     const idempotencyKey = createHash('sha256')
@@ -772,14 +1020,24 @@ export class PaymentsService {
       payment.id,
       providerPaymentId,
       refund,
+      preserveOrder,
     );
   }
 
-  private async refundLateStripePayment(orderId: string, providerPaymentId: string) {
-    const payment = await this.prisma.payment.findFirst({
-      where: { orderId, provider: PaymentProvider.STRIPE },
-    });
-    if (!payment) throw new NotFoundException('Registro de Stripe no encontrado.');
+  private async refundLateStripePayment(
+    orderId: string,
+    paymentId: string,
+    providerPaymentId: string,
+    preserveOrder: boolean,
+  ) {
+    const payment = await this.prisma.payment.findUnique({ where: { id: paymentId } });
+    if (
+      !payment ||
+      payment.orderId !== orderId ||
+      payment.provider !== PaymentProvider.STRIPE
+    ) {
+      throw new NotFoundException('Registro de Stripe no encontrado.');
+    }
     if (payment.status === PaymentStatus.REFUNDED) return;
 
     const refund = await this.stripeClient().refunds.create(
@@ -787,7 +1045,10 @@ export class PaymentsService {
         payment_intent: providerPaymentId,
         metadata: {
           orderId,
-          reason: 'order_reservation_expired',
+          paymentId,
+          reason: preserveOrder
+            ? 'payment_method_changed'
+            : 'order_reservation_expired',
         },
       },
       { idempotencyKey: `late-payment-refund-${payment.id}` },
@@ -797,6 +1058,7 @@ export class PaymentsService {
       payment.id,
       providerPaymentId,
       refund as unknown as Prisma.InputJsonValue,
+      preserveOrder,
     );
   }
 
@@ -805,23 +1067,29 @@ export class PaymentsService {
     paymentId: string,
     providerPaymentId: string,
     providerResponse: Prisma.InputJsonValue,
+    preserveOrder: boolean,
   ) {
-    await this.prisma.$transaction([
+    const updates: Prisma.PrismaPromise<unknown>[] = [
       this.prisma.payment.update({
         where: { id: paymentId },
         data: {
           status: PaymentStatus.REFUNDED,
           providerPaymentId,
-          statusDetail: 'automatic_refund_after_reservation_expired',
+          statusDetail: preserveOrder
+            ? 'automatic_refund_after_payment_method_changed'
+            : 'automatic_refund_after_reservation_expired',
           providerResponse,
           approvedAt: null,
         },
       }),
-      this.prisma.order.update({
+    ];
+    if (!preserveOrder) {
+      updates.push(this.prisma.order.update({
         where: { id: orderId },
         data: { paymentStatus: PaymentStatus.REFUNDED },
-      }),
-    ]);
+      }));
+    }
+    await this.prisma.$transaction(updates);
   }
 
   private mapMercadoPagoStatus(status: string) {
@@ -936,7 +1204,10 @@ export class PaymentsService {
   ) {
     const order = await this.prisma.order.findFirst({
       where: { publicToken: orderToken, customerId },
-      include: { items: true, payments: true },
+      include: {
+        items: true,
+        payments: { orderBy: { createdAt: 'desc' } },
+      },
     });
     if (!order) throw new NotFoundException('Orden no encontrada.');
     if (order.paymentMethod !== PaymentMethod.CARD) {
@@ -957,12 +1228,24 @@ export class PaymentsService {
 
   private cardPayment(order: CardOrder, provider: PaymentProvider) {
     const payment = order.payments.find(
-      (entry) => entry.provider === provider && entry.method === PaymentMethod.CARD,
+      (entry) =>
+        entry.provider === provider &&
+        entry.method === PaymentMethod.CARD &&
+        !this.isSupersededPaymentStatus(entry.status),
     );
     if (!payment) {
       throw new BadRequestException('La orden pertenece a otra pasarela de pago.');
     }
     return payment;
+  }
+
+  private isSupersededPaymentStatus(status: PaymentStatus) {
+    const supersededStatuses = new Set<PaymentStatus>([
+      PaymentStatus.CANCELLED,
+      PaymentStatus.REFUNDED,
+      PaymentStatus.CHARGED_BACK,
+    ]);
+    return supersededStatuses.has(status);
   }
 
   private stripeClient() {

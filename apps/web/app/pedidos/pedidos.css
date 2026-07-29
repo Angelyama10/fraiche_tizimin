@@ -95,6 +95,227 @@
   box-shadow: 0 18px 42px rgba(13, 79, 67, 0.08);
 }
 
+.pendingOrderEditor {
+  margin-bottom: 20px;
+  border: 1px solid rgba(13, 79, 67, 0.24);
+  border-radius: 7px;
+  padding: 20px;
+  background: var(--white);
+  box-shadow: 0 20px 48px rgba(13, 79, 67, 0.08);
+}
+
+.pendingOrderEditor > header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 16px;
+  gap: 14px;
+}
+
+.pendingOrderEditor > header h2 {
+  margin: 5px 0 4px;
+  font-size: 29px;
+  line-height: 1;
+}
+
+.pendingOrderEditor > header p {
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: 9px;
+}
+
+.pendingOrderEditor > header > button {
+  display: grid;
+  width: 36px;
+  height: 36px;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  background: var(--paper);
+  color: var(--emerald);
+}
+
+.pendingOrderEditor form {
+  display: grid;
+  padding-top: 18px;
+  gap: 22px;
+}
+
+.pendingOrderEditor fieldset {
+  min-width: 0;
+  margin: 0;
+  border: 0;
+  padding: 0;
+}
+
+.pendingOrderEditor legend,
+.pendingOrderNotes > span {
+  display: block;
+  margin-bottom: 9px;
+  color: var(--emerald);
+  font-size: 10px;
+  font-weight: 900;
+}
+
+.pendingOrderChoices,
+.pendingAddressChoices,
+.pendingGatewayChoices {
+  display: grid;
+  gap: 8px;
+}
+
+.pendingOrderChoices > button,
+.pendingAddressChoices > button,
+.pendingGatewayChoices > button {
+  display: grid;
+  width: 100%;
+  min-height: 64px;
+  align-items: center;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 10px 12px;
+  background: #fbfcfb;
+  color: var(--ink);
+  text-align: left;
+  grid-template-columns: 22px minmax(0, 1fr) 18px;
+  gap: 9px;
+}
+
+.pendingOrderChoices > button:hover,
+.pendingAddressChoices > button:hover,
+.pendingGatewayChoices > button:hover,
+.pendingOrderChoices > button.isActive,
+.pendingAddressChoices > button.isActive,
+.pendingGatewayChoices > button.isActive {
+  border-color: var(--emerald);
+  background: var(--mint);
+}
+
+.pendingOrderChoices > button:disabled,
+.pendingAddressChoices > button:disabled,
+.pendingGatewayChoices > button:disabled {
+  cursor: not-allowed;
+  opacity: 0.46;
+}
+
+.pendingOrderChoices button > span,
+.pendingAddressChoices button > span,
+.pendingGatewayChoices button > div {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+}
+
+.pendingOrderChoices strong,
+.pendingAddressChoices strong,
+.pendingGatewayChoices strong {
+  font-size: 10px;
+}
+
+.pendingOrderChoices small,
+.pendingAddressChoices small,
+.pendingGatewayChoices small {
+  overflow: hidden;
+  margin-top: 2px;
+  color: var(--ink-soft);
+  font-size: 8px;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+}
+
+.pendingGatewayChoices > button {
+  grid-template-columns: 34px minmax(0, 1fr) 18px;
+}
+
+.pendingGatewayChoices > button > span {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--emerald);
+  color: var(--white);
+  font-size: 8px;
+  font-weight: 900;
+}
+
+.pendingGatewayChoices > button:last-child > span {
+  background: #635bff;
+}
+
+.pendingAddressChoices {
+  margin-bottom: 12px;
+}
+
+.pendingAddressForm {
+  display: grid;
+  gap: 10px;
+}
+
+.pendingAddressForm > label,
+.pendingOrderNotes {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.pendingAddressForm > label > span {
+  color: var(--ink-soft);
+  font-size: 8px;
+  font-weight: 800;
+}
+
+.pendingAddressForm input,
+.pendingOrderNotes textarea {
+  width: 100%;
+  min-height: 44px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  padding: 0 11px;
+  outline: 0;
+  background: #fbfcfb;
+  color: var(--ink);
+  font: inherit;
+  font-size: 10px;
+}
+
+.pendingOrderNotes textarea {
+  min-height: 88px;
+  padding-block: 10px;
+  resize: vertical;
+}
+
+.pendingAddressForm input:focus,
+.pendingOrderNotes textarea:focus {
+  border-color: var(--emerald);
+  box-shadow: 0 0 0 3px rgba(13, 79, 67, 0.1);
+}
+
+.pendingOrderEditor__actions {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 8px;
+}
+
+.editCheckoutButton {
+  display: inline-flex;
+  width: 100%;
+  min-height: 42px;
+  align-items: center;
+  justify-content: center;
+  margin-top: 9px;
+  border: 1px solid var(--emerald);
+  border-radius: 5px;
+  padding: 0 10px;
+  background: transparent;
+  color: var(--emerald);
+  font-size: 8px;
+  font-weight: 900;
+  gap: 6px;
+}
+
 .transferPaymentPanel__heading {
   display: flex;
   align-items: center;
@@ -490,11 +711,27 @@
 
   .trackingSection,
   .orderProducts,
+  .pendingOrderEditor,
   .transferPaymentPanel,
   .orderPayment,
   .orderAddress,
   .orderTotals {
     padding: 28px;
+  }
+
+  .pendingOrderChoices,
+  .pendingAddressChoices,
+  .pendingGatewayChoices,
+  .pendingAddressForm {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .pendingAddressForm > .isWide {
+    grid-column: 1 / -1;
+  }
+
+  .pendingOrderEditor__actions {
+    grid-template-columns: minmax(160px, 0.55fr) minmax(220px, 1fr);
   }
 
   .trackingTimeline > div > strong {

@@ -5,16 +5,21 @@ import {
   ArrowLeft,
   ArrowRight,
   BadgePercent,
+  BadgePlus,
   BarChart3,
   Boxes,
   Check,
   ChevronRight,
   CircleDollarSign,
+  CreditCard,
   Eye,
   FilePlus2,
+  FolderPlus,
   ImagePlus,
   KeyRound,
   LogOut,
+  Mail,
+  MapPin,
   Menu,
   Package,
   PackageCheck,
@@ -29,6 +34,7 @@ import {
   Store,
   Star,
   Tag,
+  Phone,
   Trash2,
   Truck,
   X,
@@ -37,9 +43,22 @@ import Link from 'next/link';
 import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
 import { apiRequest, errorMessage, getApiBaseUrl } from '@/lib/api';
 import { LINE_LABELS } from '@/lib/catalog';
+import {
+  FALLBACK_CATALOG_NAVIGATION,
+  mergeCatalogNavigation,
+} from '@/lib/catalog-navigation';
 import { formatDate, formatMoney, initials } from '@/lib/format';
 import { FULFILLMENT_STATUS_LABELS, ORDER_STATUS_LABELS, PAYMENT_STATUS_LABELS, statusTone } from '@/lib/status';
-import type { Category, Paginated, ProductImage, ProductLine, ScentFamily } from '@/lib/types';
+import type {
+  Brand,
+  CatalogLine,
+  CatalogNavigation,
+  Category,
+  Paginated,
+  PerfumeHouse,
+  ProductImage,
+  ProductLine,
+} from '@/lib/types';
 import { BrandIdentity } from '@/components/site/brand-identity';
 import { AdminNotificationCenter } from './admin-notification-center';
 import { AdminSiteEditor } from './admin-site-editor';
@@ -63,9 +82,10 @@ type AdminProduct = {
   seoTitle?: string | null; seoDescription?: string | null;
   line: ProductLine; status: string; isFeatured: boolean; isNew: boolean;
   brand?: { name: string; slug: string } | null;
+  inspirationHouse?: PerfumeHouse | null;
   images: ProductImage[];
   categories: Array<{ category: Category }>;
-  scentFamilies: Array<{ scentFamily: ScentFamily }>;
+  catalogLines: Array<{ catalogLine: CatalogLine }>;
   variants: Array<{ id: string; sku: string; name: string; catalogPriceCents: number | null; isActive: boolean; inventoryLevels: Array<{ onHand: number; available: number; reserved: number }> }>;
   updatedAt: string;
 };
@@ -84,7 +104,9 @@ type InventoryItem = {
 
 type AdminOrder = {
   publicToken: string; number: string; customerName: string; customerEmail?: string; customerPhone?: string;
-  status: string; paymentStatus: string; fulfillmentStatus: string; totalCents: number; currency: string; deliveryMethod: string; createdAt: string;
+  status: string; paymentStatus: string; fulfillmentStatus: string; totalCents: number; currency: string;
+  paymentMethod: string; deliveryMethod: string; shippingAddress?: Record<string, string | null> | null;
+  customerNotes?: string | null; createdAt: string;
   _count?: { items: number; shipments: number };
   shipments?: Array<{ id: string; carrier: string; trackingNumber: string; status: string }>;
   payments?: Array<{
@@ -160,8 +182,12 @@ function AdminWorkspace({ session, onLogout }: { session: AdminSession; onLogout
   const [orders, setOrders] = useState<AdminOrder[]>([]);
   const [promotions, setPromotions] = useState<AdminPromotion[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
-  const [scents, setScents] = useState<ScentFamily[]>([]);
-  const [modal, setModal] = useState<'product' | 'product-edit' | 'product-images' | 'inventory' | 'promotion' | 'promotion-edit' | 'shipment' | 'price' | null>(null);
+  const [brands, setBrands] = useState<Brand[]>([]);
+  const [catalogNavigation, setCatalogNavigation] = useState<CatalogNavigation>(
+    FALLBACK_CATALOG_NAVIGATION,
+  );
+  const [perfumeHouses, setPerfumeHouses] = useState<PerfumeHouse[]>([]);
+  const [modal, setModal] = useState<'product' | 'product-edit' | 'product-images' | 'inventory' | 'promotion' | 'promotion-edit' | 'shipment' | 'delivery' | 'price' | null>(null);
   const [selected, setSelected] = useState<InventoryItem | AdminOrder | AdminProduct | AdminPromotion | null>(null);
   const [notice, setNotice] = useState<{ tone: 'success' | 'error'; message: string } | null>(null);
 
@@ -176,15 +202,30 @@ function AdminWorkspace({ session, onLogout }: { session: AdminSession; onLogout
   const loadAll = useCallback(async () => {
     setLoading(true);
     try {
-      const [nextDashboard, nextInventory, nextOrders, nextPromotions, nextCategories, nextScents] = await Promise.all([
+      const [
+        nextDashboard,
+        nextInventory,
+        nextOrders,
+        nextPromotions,
+        nextCategories,
+        nextBrands,
+        nextNavigation,
+        nextPerfumeHouses,
+      ] = await Promise.all([
         request<Dashboard>('/admin/dashboard'),
         request<Paginated<InventoryItem>>('/admin/inventory?page=1&pageSize=100'),
         request<Paginated<AdminOrder>>('/admin/orders?page=1&pageSize=100'),
         request<Paginated<AdminPromotion>>('/admin/promotions?page=1&pageSize=100'),
         apiRequest<Category[]>('/categories', { cache: 'no-store' }),
-        apiRequest<ScentFamily[]>('/scent-families', { cache: 'no-store' }),
+        apiRequest<Brand[]>('/brands', { cache: 'no-store' }),
+        apiRequest<CatalogNavigation>('/catalog/navigation', { cache: 'no-store' })
+          .catch(() => FALLBACK_CATALOG_NAVIGATION),
+        apiRequest<PerfumeHouse[]>('/perfume-houses', { cache: 'no-store' })
+          .catch(() => []),
       ]);
-      setDashboard(nextDashboard); setInventory(nextInventory.data); setOrders(nextOrders.data); setPromotions(nextPromotions.data); setCategories(nextCategories); setScents(nextScents);
+      setDashboard(nextDashboard); setInventory(nextInventory.data); setOrders(nextOrders.data); setPromotions(nextPromotions.data); setCategories(nextCategories); setBrands(nextBrands);
+      setCatalogNavigation(mergeCatalogNavigation(nextNavigation));
+      setPerfumeHouses(nextPerfumeHouses);
     } catch (error) { setNotice({ tone: 'error', message: errorMessage(error) }); }
     finally { setLoading(false); }
   }, [request]);
@@ -224,21 +265,22 @@ function AdminWorkspace({ session, onLogout }: { session: AdminSession; onLogout
             {tab === 'dashboard' && <DashboardTab dashboard={dashboard} onTab={setTab} />}
             {tab === 'products' && <ProductsTab refreshKey={refreshKey} onCreate={() => open('product')} onEdit={(product) => open('product-edit', product)} onEditImages={(product) => open('product-images', product)} onEditPrice={(product) => open('price', product)} request={request} onSuccess={actionSuccess} />}
             {tab === 'inventory' && <InventoryTab inventory={inventory} onAdjust={(item) => open('inventory', item)} />}
-            {tab === 'orders' && <OrdersTab orders={orders} onShipment={(order) => open('shipment', order)} request={request} onSuccess={actionSuccess} />}
+            {tab === 'orders' && <OrdersTab orders={orders} onDelivery={(order) => open('delivery', order)} onShipment={(order) => open('shipment', order)} request={request} onSuccess={actionSuccess} />}
             {tab === 'promotions' && <PromotionsTab promotions={promotions} onCreate={() => open('promotion')} onEdit={(promotion) => open('promotion-edit', promotion)} request={request} onSuccess={actionSuccess} />}
             {tab === 'content' && <AdminSiteEditor onNotice={(tone, message) => setNotice({ tone, message })} request={request} />}
           </>}
         </div>
       </section>
       {modal && <AdminModal title={modalTitle(modal)} onClose={() => setModal(null)}>
-        {modal === 'product' && <ProductForm categories={categories} scents={scents} request={request} onSuccess={actionSuccess} />}
-        {modal === 'product-edit' && selected && <ProductEditForm product={selected as AdminProduct} categories={categories} scents={scents} request={request} onSuccess={actionSuccess} />}
+        {modal === 'product' && <ProductForm brands={brands} categories={categories} navigation={catalogNavigation} perfumeHouses={perfumeHouses} request={request} onSuccess={actionSuccess} />}
+        {modal === 'product-edit' && selected && <ProductEditForm product={selected as AdminProduct} brands={brands} categories={categories} navigation={catalogNavigation} perfumeHouses={perfumeHouses} request={request} onSuccess={actionSuccess} />}
         {modal === 'product-images' && selected && <ProductImagesForm product={selected as AdminProduct} request={request} onSuccess={actionSuccess} />}
         {modal === 'inventory' && selected && <InventoryForm item={selected as InventoryItem} request={request} onSuccess={actionSuccess} />}
         {modal === 'price' && selected && <PriceForm product={selected as AdminProduct} request={request} onSuccess={actionSuccess} />}
         {modal === 'promotion' && <PromotionForm request={request} onSuccess={actionSuccess} />}
         {modal === 'promotion-edit' && selected && <PromotionForm promotion={selected as AdminPromotion} request={request} onSuccess={actionSuccess} />}
         {modal === 'shipment' && selected && <ShipmentForm order={selected as AdminOrder} request={request} onSuccess={actionSuccess} />}
+        {modal === 'delivery' && selected && <DeliveryDetails order={selected as AdminOrder} />}
       </AdminModal>}
     </main>
   );
@@ -364,7 +406,7 @@ function InventoryTab({ inventory, onAdjust }: { inventory: InventoryItem[]; onA
   return <><AdminHeading eyebrow="Control de stock" title="Inventario" description={`${inventory.reduce((sum, item) => sum + item.available, 0)} unidades disponibles`} action={<button className={`adminFilterToggle ${onlyLow ? 'isActive' : ''}`} onClick={() => setOnlyLow(!onlyLow)} type="button"><AlertTriangle size={15} /> Poco stock</button>} /><AdminSearch value={query} onChange={setQuery} placeholder="Buscar producto o SKU" /><div className="adminTableWrap"><table className="adminTable"><thead><tr><th>Producto</th><th>Ubicación</th><th>Disponible</th><th>Reservado</th><th>Total</th><th>Alerta</th><th /></tr></thead><tbody>{visible.map((item) => <tr key={item.id}><td><div className="tablePrimary"><span><Boxes size={16} /></span><div><strong>{item.variant.product.name}</strong><small>{item.variant.sku}</small></div></div></td><td>{item.location.name}</td><td><strong className={item.available <= item.lowStockThreshold ? 'stockLow' : ''}>{item.available}</strong></td><td>{item.reserved}</td><td>{item.onHand}</td><td>{item.available <= item.lowStockThreshold ? <span className="adminStatus adminStatus--danger">Reponer</span> : <span className="adminStatus adminStatus--success">Bien</span>}</td><td><button className="adminSecondaryButton" onClick={() => onAdjust(item)} type="button">Ajustar</button></td></tr>)}</tbody></table></div></>;
 }
 
-function OrdersTab({ orders, onShipment, request, onSuccess }: { orders: AdminOrder[]; onShipment: (order: AdminOrder) => void; request: AdminRequest; onSuccess: (message: string) => void }) {
+function OrdersTab({ orders, onDelivery, onShipment, request, onSuccess }: { orders: AdminOrder[]; onDelivery: (order: AdminOrder) => void; onShipment: (order: AdminOrder) => void; request: AdminRequest; onSuccess: (message: string) => void }) {
   const [query, setQuery] = useState('');
   const visible = orders.filter((order) =>
     `${order.number} ${order.customerName} ${order.customerEmail}`
@@ -521,6 +563,13 @@ function OrdersTab({ orders, onShipment, request, onSuccess }: { orders: AdminOr
                   </td>
                   <td>
                     <div className="tableActions">
+                      <button
+                        className="adminSecondaryButton"
+                        onClick={() => onDelivery(order)}
+                        type="button"
+                      >
+                        <MapPin size={14} /> Entrega
+                      </button>
                       {proof && (
                         <>
                           <button
@@ -636,6 +685,67 @@ function categorySlugsForSelection(categories: Category[], selectedSlugs: string
     }
   }
   return [...selected];
+}
+
+function CatalogLineSelector({
+  navigation,
+  selectedSlugs,
+  onChange,
+}: {
+  navigation: CatalogNavigation;
+  selectedSlugs: string[];
+  onChange: (slugs: string[]) => void;
+}) {
+  const selected = new Set(selectedSlugs);
+
+  function toggle(slug: string) {
+    onChange(
+      selected.has(slug)
+        ? selectedSlugs.filter((item) => item !== slug)
+        : [...selectedSlugs, slug],
+    );
+  }
+
+  return (
+    <fieldset className="adminCatalogNavigation">
+      <legend>Ubicación dentro del menú</legend>
+      <p>
+        Elige dónde encontrará el cliente este producto. Puedes seleccionar más de una
+        línea, por ejemplo una inspiración y una colección.
+      </p>
+      <div>
+        {navigation.sections.map((section) => (
+          <section key={section.id}>
+            <header>
+              <strong>{section.name}</strong>
+              <small>{section.description}</small>
+            </header>
+            <div>
+              {section.lines.map((catalogLine) => (
+                <label key={catalogLine.id}>
+                  <input
+                    checked={selected.has(catalogLine.slug)}
+                    onChange={() => toggle(catalogLine.slug)}
+                    type="checkbox"
+                  />
+                  <span><Check size={12} /></span>
+                  <div>
+                    <strong>{catalogLine.name}</strong>
+                    <small>{catalogLine.description}</small>
+                  </div>
+                </label>
+              ))}
+            </div>
+          </section>
+        ))}
+      </div>
+      <small className={selectedSlugs.length ? 'isValid' : 'isMissing'}>
+        {selectedSlugs.length
+          ? `${selectedSlugs.length} ubicación${selectedSlugs.length === 1 ? '' : 'es'} seleccionada${selectedSlugs.length === 1 ? '' : 's'}.`
+          : 'Selecciona al menos una ubicación para continuar.'}
+      </small>
+    </fieldset>
+  );
 }
 
 function productImagesPayload(images: ProductImage[]) {
@@ -808,43 +918,214 @@ function ProductImageManager({
   </fieldset>;
 }
 
-function ProductForm({ categories, scents, request, onSuccess }: { categories: Category[]; scents: ScentFamily[]; request: AdminRequest; onSuccess: (message: string) => void }) {
+type SkuAvailability = {
+  sku: string;
+  available: boolean;
+  conflict: {
+    variantId: string;
+    productId: string;
+    productName: string;
+    productSlug: string;
+  } | null;
+};
+
+type CatalogEditorMode = 'brand' | 'category' | 'house' | null;
+
+const LINE_VARIANT_DEFAULTS: Record<ProductLine, {
+  name: string;
+  concentration: string;
+  percentage: string;
+  volume: string;
+  fixedPrice?: string;
+}> = {
+  DESIGNER_CLASSIC: { name: '60 ml clásica', concentration: 'Clásica', percentage: '', volume: '60' },
+  DESIGNER_37: { name: '60 ml 37%', concentration: '37%', percentage: '37', volume: '60' },
+  NEECHE_PASSION: { name: '60 ml clásica', concentration: 'Clásica', percentage: '', volume: '60', fixedPrice: '350' },
+  PREMIUM: { name: '60 ml 37%', concentration: '37%', percentage: '37', volume: '60', fixedPrice: '380' },
+  PERSONAL_CARE: { name: 'Presentación estándar', concentration: '', percentage: '', volume: '' },
+};
+
+function ProductForm({
+  brands,
+  categories,
+  navigation,
+  perfumeHouses,
+  request,
+  onSuccess,
+}: {
+  brands: Brand[];
+  categories: Category[];
+  navigation: CatalogNavigation;
+  perfumeHouses: PerfumeHouse[];
+  request: AdminRequest;
+  onSuccess: (message: string) => void;
+}) {
   const [saving, setSaving] = useState(false);
   const [productName, setProductName] = useState('');
+  const [slug, setSlug] = useState('');
+  const [slugEdited, setSlugEdited] = useState(false);
+  const [line, setLine] = useState<ProductLine>('DESIGNER_CLASSIC');
+  const [variantName, setVariantName] = useState(LINE_VARIANT_DEFAULTS.DESIGNER_CLASSIC.name);
+  const [concentration, setConcentration] = useState(LINE_VARIANT_DEFAULTS.DESIGNER_CLASSIC.concentration);
+  const [percentage, setPercentage] = useState(LINE_VARIANT_DEFAULTS.DESIGNER_CLASSIC.percentage);
+  const [volume, setVolume] = useState(LINE_VARIANT_DEFAULTS.DESIGNER_CLASSIC.volume);
+  const [price, setPrice] = useState('');
+  const [sku, setSku] = useState('');
+  const [skuCheck, setSkuCheck] = useState<{ state: 'idle' | 'checking' | 'available' | 'conflict' | 'invalid'; message: string }>({ state: 'idle', message: '' });
   const [images, setImages] = useState<ProductImage[]>([]);
-  const choices = categoryChoices(categories);
+  const [localBrands, setLocalBrands] = useState(brands);
+  const [localCategories, setLocalCategories] = useState(categories);
+  const [localPerfumeHouses, setLocalPerfumeHouses] = useState(perfumeHouses);
+  const [brandSlug, setBrandSlug] = useState(brands[0]?.slug ?? '');
+  const [categorySlug, setCategorySlug] = useState(categoryChoices(categories)[0]?.category.slug ?? '');
+  const [catalogLineSlugs, setCatalogLineSlugs] = useState<string[]>([]);
+  const [inspirationHouseSlug, setInspirationHouseSlug] = useState('');
+  const [catalogEditor, setCatalogEditor] = useState<CatalogEditorMode>(null);
+  const [catalogSaving, setCatalogSaving] = useState(false);
+  const [catalogError, setCatalogError] = useState('');
+  const [newCatalogName, setNewCatalogName] = useState('');
+  const [newCategoryParent, setNewCategoryParent] = useState('');
+  const choices = categoryChoices(localCategories);
+  const isCatalogPrice = !['NEECHE_PASSION', 'PREMIUM'].includes(line);
+  const isPerfume = line !== 'PERSONAL_CARE';
+
+  useEffect(() => {
+    const normalized = sku.trim().toUpperCase();
+    if (!normalized) {
+      setSkuCheck({ state: 'idle', message: '' });
+      return;
+    }
+    if (!/^[A-Z0-9][A-Z0-9._-]*$/.test(normalized) || normalized.length > 64) {
+      setSkuCheck({ state: 'invalid', message: 'Usa letras, números, punto, guion o guion bajo.' });
+      return;
+    }
+    setSkuCheck({ state: 'checking', message: 'Comprobando disponibilidad…' });
+    const timeout = window.setTimeout(async () => {
+      try {
+        const result = await request<SkuAvailability>(`/admin/products/sku-availability?sku=${encodeURIComponent(normalized)}`);
+        setSkuCheck(result.available
+          ? { state: 'available', message: 'SKU disponible. No se sobrescribirá ningún artículo.' }
+          : { state: 'conflict', message: `Ya pertenece a “${result.conflict?.productName ?? 'otro producto'}”.` });
+      } catch (error) {
+        setSkuCheck({ state: 'invalid', message: errorMessage(error) });
+      }
+    }, 350);
+    return () => window.clearTimeout(timeout);
+  }, [request, sku]);
+
+  function changeLine(nextLine: ProductLine) {
+    const defaults = LINE_VARIANT_DEFAULTS[nextLine];
+    setLine(nextLine);
+    setVariantName(defaults.name);
+    setConcentration(defaults.concentration);
+    setPercentage(defaults.percentage);
+    setVolume(defaults.volume);
+    setPrice(defaults.fixedPrice ?? '');
+  }
+
+  function startCatalogEditor(mode: Exclude<CatalogEditorMode, null>) {
+    setCatalogEditor(mode);
+    setCatalogError('');
+    setNewCatalogName('');
+    setNewCategoryParent(mode === 'category' && line === 'PERSONAL_CARE'
+      ? localCategories.find((category) => category.slug === 'cuidado-personal')?.slug ?? ''
+      : '');
+  }
+
+  async function createCatalogEntry() {
+    const name = newCatalogName.trim();
+    if (!name) {
+      setCatalogError('Escribe un nombre antes de guardar.');
+      return;
+    }
+    setCatalogSaving(true);
+    setCatalogError('');
+    try {
+      if (catalogEditor === 'brand') {
+        const created = await request<Brand>('/admin/brands', {
+          method: 'POST',
+          body: JSON.stringify({ name }),
+        });
+        const nextBrands = [...localBrands, created].sort((a, b) => a.name.localeCompare(b.name, 'es'));
+        setLocalBrands(nextBrands);
+        setBrandSlug(created.slug);
+      }
+      if (catalogEditor === 'category') {
+        const created = await request<Category>('/admin/categories', {
+          method: 'POST',
+          body: JSON.stringify({
+            name,
+            parentSlug: newCategoryParent || undefined,
+            description: `Productos de ${name}.`,
+          }),
+        });
+        const refreshed = await apiRequest<Category[]>('/categories', { cache: 'no-store' });
+        setLocalCategories(refreshed);
+        setCategorySlug(created.slug);
+      }
+      if (catalogEditor === 'house') {
+        const created = await request<PerfumeHouse>('/admin/perfume-houses', {
+          method: 'POST',
+          body: JSON.stringify({
+            name,
+            description: `Casa perfumera de inspiración: ${name}.`,
+          }),
+        });
+        const nextHouses = [...localPerfumeHouses, created].sort((a, b) =>
+          a.name.localeCompare(b.name, 'es'),
+        );
+        setLocalPerfumeHouses(nextHouses);
+        setInspirationHouseSlug(created.slug);
+      }
+      setCatalogEditor(null);
+      setNewCatalogName('');
+    } catch (error) {
+      setCatalogError(errorMessage(error));
+    } finally {
+      setCatalogSaving(false);
+    }
+  }
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
-    const price = Number(form.get('price') || 0);
-    const categorySlug = String(form.get('categorySlug') ?? '');
+    if (skuCheck.state !== 'available') {
+      window.alert(skuCheck.state === 'conflict'
+        ? 'Ese SKU ya está registrado. Usa uno diferente.'
+        : 'Espera a que el sistema confirme que el SKU está disponible.');
+      return;
+    }
+    if (!brandSlug || !categorySlug || !catalogLineSlugs.length) {
+      window.alert('Selecciona una marca, una categoría y al menos una ubicación del menú.');
+      return;
+    }
     setSaving(true);
     try {
       await request('/admin/products', {
         method: 'POST',
         body: JSON.stringify({
-          slug: form.get('slug'),
-          name: form.get('name'),
-          shortDescription: form.get('shortDescription') || undefined,
-          description: form.get('description') || undefined,
+          slug,
+          name: productName,
+          shortDescription: form.get('shortDescription'),
+          description: form.get('description'),
           seoTitle: form.get('seoTitle') || undefined,
           seoDescription: form.get('seoDescription') || undefined,
-          line: form.get('line'),
+          line,
           status: form.get('status'),
-          brandSlug: form.get('brandSlug') || undefined,
-          categorySlugs: categorySlugsForSelection(categories, [categorySlug]),
-          scentSlugs: form.getAll('scentSlugs'),
+          brandSlug,
+          categorySlugs: categorySlugsForSelection(localCategories, [categorySlug]),
+          catalogLineSlugs,
+          inspirationHouseSlug: inspirationHouseSlug || undefined,
           isFeatured: form.get('isFeatured') === 'on',
           isNew: form.get('isNew') === 'on',
           images: productImagesPayload(images),
           variants: [{
-            sku: form.get('sku'),
-            name: form.get('variantName'),
-            concentrationLabel: form.get('concentrationLabel') || undefined,
-            concentrationPercent: form.get('concentrationPercent') ? Number(form.get('concentrationPercent')) : undefined,
-            volumeMl: form.get('volumeMl') ? Number(form.get('volumeMl')) : undefined,
-            catalogPriceCents: price ? Math.round(price * 100) : undefined,
+            sku: sku.trim().toUpperCase(),
+            name: variantName,
+            concentrationLabel: concentration || undefined,
+            concentrationPercent: percentage ? Number(percentage) : undefined,
+            volumeMl: volume ? Number(volume) : undefined,
+            catalogPriceCents: isCatalogPrice ? Math.round(Number(price) * 100) : undefined,
             initialStock: Number(form.get('initialStock') || 0),
             lowStockThreshold: Number(form.get('lowStockThreshold') || 5),
           }],
@@ -860,69 +1141,107 @@ function ProductForm({ categories, scents, request, onSuccess }: { categories: C
 
   return <form className="adminForm" onSubmit={submit}>
     <div className="adminFormGrid">
-      <AdminField label="Nombre"><input name="name" onChange={(event) => setProductName(event.target.value)} required /></AdminField>
-      <AdminField label="Slug"><input name="slug" pattern="[a-z0-9-]+" placeholder="nombre-del-producto" required /></AdminField>
+      <AdminField label="Nombre" description="Nombre visible en la tienda y en el carrito."><input maxLength={180} name="name" onChange={(event) => {
+        const value = event.target.value;
+        setProductName(value);
+        if (!slugEdited) setSlug(normalizeSlug(value));
+      }} required value={productName} /></AdminField>
+      <AdminField label="Slug" description="Dirección única del producto; se genera con el nombre y puedes ajustarla."><input maxLength={160} name="slug" onChange={(event) => { setSlugEdited(true); setSlug(normalizeSlug(event.target.value)); }} pattern="[a-z0-9]+(?:-[a-z0-9]+)*" placeholder="nombre-del-producto" required value={slug} /></AdminField>
     </div>
-    <AdminField label="Descripción corta"><input maxLength={240} name="shortDescription" /></AdminField>
-    <AdminField label="Descripción"><textarea name="description" rows={3} /></AdminField>
+    <AdminField label="Descripción corta" description="Resumen que se muestra en listados y resultados de búsqueda."><input maxLength={240} name="shortDescription" required /></AdminField>
+    <AdminField label="Descripción" description="Información completa que verá el cliente en la ficha."><textarea maxLength={4000} name="description" required rows={3} /></AdminField>
     <div className="adminFormDivider"><span>Vista previa en buscadores</span></div>
     <AdminField label="Título SEO (opcional)"><input maxLength={70} name="seoTitle" placeholder="Si se deja vacío, se usa el nombre del producto" /></AdminField>
     <AdminField label="Descripción SEO (opcional)"><textarea maxLength={170} name="seoDescription" placeholder="Resumen breve para Google y al compartir el enlace" rows={2} /></AdminField>
     <p className="adminFormHint">Estos textos no cambian la ficha visible del producto; ayudan a presentar mejor su enlace en buscadores y redes.</p>
     <div className="adminFormGrid">
-      <AdminField label="Línea"><select name="line" required>{Object.entries(LINE_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></AdminField>
+      <AdminField label="Política de precio" description="Regla interna para calcular el precio. La ubicación visible se elige más abajo."><select name="line" onChange={(event) => changeLine(event.target.value as ProductLine)} required value={line}>{Object.entries(LINE_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></AdminField>
       <AdminField label="Estado"><select defaultValue="ACTIVE" name="status"><option value="ACTIVE">Publicado</option><option value="DRAFT">Borrador</option></select></AdminField>
-      <AdminField label="Marca"><select name="brandSlug"><option value="fraiche">Fraiche</option><option value="neeche">Neeche Passion</option><option value="premium">Premium</option><option value="victorias-secret">Victoria&apos;s Secret</option><option value="arabic-care">Cuidado árabe</option></select></AdminField>
-      <AdminField label="Categoría">
-        <select name="categorySlug" required>
+      <div className="adminCatalogField">
+        <div><span>Marca</span><button onClick={() => startCatalogEditor('brand')} type="button"><BadgePlus size={14} /> Nueva marca</button></div>
+        <small>Fabricante o línea comercial asociada al producto.</small>
+        <select name="brandSlug" onChange={(event) => setBrandSlug(event.target.value)} required value={brandSlug}>
+          <option disabled value="">Selecciona una marca</option>
+          {localBrands.map((brand) => <option key={brand.id} value={brand.slug}>{brand.name}</option>)}
+        </select>
+      </div>
+      <div className="adminCatalogField">
+        <div><span>Categoría</span><button onClick={() => startCatalogEditor('category')} type="button"><FolderPlus size={14} /> Nueva categoría</button></div>
+        <small>Sección donde el cliente encontrará el artículo.</small>
+        <select name="categorySlug" onChange={(event) => setCategorySlug(event.target.value)} required value={categorySlug}>
+          <option disabled value="">Selecciona una categoría</option>
           {choices.map(({ category, parent }) => <option key={category.id} value={category.slug}>{parent ? `${parent.name} · ${category.name}` : category.name}</option>)}
         </select>
-      </AdminField>
+      </div>
+      <div className="adminCatalogField">
+        <div><span>Casa perfumera de inspiración</span><button onClick={() => startCatalogEditor('house')} type="button"><BadgePlus size={14} /> Nueva casa</button></div>
+        <small>Ejemplo: Chanel o Dior. Describe en qué perfume se inspira; no sustituye la marca comercial.</small>
+        <select name="inspirationHouseSlug" onChange={(event) => setInspirationHouseSlug(event.target.value)} value={inspirationHouseSlug}>
+          <option value="">No aplica</option>
+          {localPerfumeHouses.map((house) => <option key={house.id} value={house.slug}>{house.name}</option>)}
+        </select>
+      </div>
     </div>
-    <fieldset className="adminCheckGrid"><legend>Familias aromáticas</legend>{scents.map((scent) => <label key={scent.id}><input name="scentSlugs" type="checkbox" value={scent.slug} /><span><Check size={11} /></span>{scent.name}</label>)}</fieldset>
+    <CatalogLineSelector navigation={navigation} onChange={setCatalogLineSlugs} selectedSlugs={catalogLineSlugs} />
+    {catalogEditor && <section className="adminInlineCreator" aria-label={catalogEditor === 'brand' ? 'Crear marca' : catalogEditor === 'house' ? 'Crear casa perfumera' : 'Crear categoría'}>
+      <div><strong>{catalogEditor === 'brand' ? 'Nueva marca' : catalogEditor === 'house' ? 'Nueva casa perfumera' : 'Nueva categoría'}</strong><button aria-label="Cerrar" onClick={() => setCatalogEditor(null)} type="button"><X size={15} /></button></div>
+      <AdminField label="Nombre" description={catalogEditor === 'brand' ? 'Ejemplo: Victoria’s Secret.' : catalogEditor === 'house' ? 'Ejemplo: Chanel, Dior o Versace.' : 'Ejemplo: Sérums faciales.'}><input autoFocus maxLength={120} onChange={(event) => setNewCatalogName(event.target.value)} value={newCatalogName} /></AdminField>
+      {catalogEditor === 'category' && <AdminField label="Categoría superior (opcional)" description="Agrúpala dentro de Perfumes o Cuidado personal; déjala vacía para crear una sección principal."><select onChange={(event) => setNewCategoryParent(event.target.value)} value={newCategoryParent}><option value="">Sin categoría superior</option>{localCategories.map((category) => <option key={category.id} value={category.slug}>{category.name}</option>)}</select></AdminField>}
+      {catalogError && <p className="adminInlineCreator__error">{catalogError}</p>}
+      <button className="adminSecondaryButton" disabled={catalogSaving} onClick={() => void createCatalogEntry()} type="button">{catalogSaving ? <span className="buttonSpinner" /> : <><Plus size={14} /> Crear y seleccionar</>}</button>
+    </section>}
     <ProductImageManager images={images} onChange={setImages} productName={productName} request={request} />
     <div className="adminFormDivider"><span>Variante inicial</span></div>
     <div className="adminFormGrid">
-      <AdminField label="SKU"><input name="sku" required /></AdminField>
-      <AdminField label="Nombre de variante"><input name="variantName" placeholder="60 ml 37%" required /></AdminField>
-      <AdminField label="Concentración"><input name="concentrationLabel" placeholder="Clásica o 37%" /></AdminField>
-      <AdminField label="Porcentaje"><input min="0" name="concentrationPercent" step="0.01" type="number" /></AdminField>
-      <AdminField label="Volumen ml"><input min="1" name="volumeMl" type="number" /></AdminField>
-      <AdminField label="Precio MXN"><input min="0" name="price" step="0.01" type="number" /></AdminField>
+      <AdminField label="SKU" description="Código comercial único de inventario. El ID técnico se genera automáticamente y ningún artículo existente será sobrescrito."><input aria-describedby="sku-status" autoCapitalize="characters" maxLength={64} name="sku" onChange={(event) => setSku(event.target.value.toUpperCase())} pattern="[A-Za-z0-9][A-Za-z0-9._-]*" required value={sku} /><small className={`adminFieldStatus adminFieldStatus--${skuCheck.state}`} id="sku-status">{skuCheck.message}</small></AdminField>
+      <AdminField label="Nombre de variante" description="La presentación que verá el cliente, por ejemplo 60 ml 37%."><input maxLength={120} name="variantName" onChange={(event) => setVariantName(event.target.value)} placeholder="60 ml 37%" required value={variantName} /></AdminField>
+      <AdminField label="Concentración" description={isPerfume ? 'Nombre comercial de la intensidad.' : 'Opcional para cuidado personal.'}><input name="concentrationLabel" onChange={(event) => setConcentration(event.target.value)} placeholder="Clásica o 37%" required={isPerfume} value={concentration} /></AdminField>
+      <AdminField label="Porcentaje" description="Porcentaje real de esencia cuando aplique; máximo 100."><input max="100" min="0" name="concentrationPercent" onChange={(event) => setPercentage(event.target.value)} required={['DESIGNER_37', 'PREMIUM'].includes(line)} step="0.01" type="number" value={percentage} /></AdminField>
+      <AdminField label="Volumen ml" description={isPerfume ? 'Presentación en mililitros, por ejemplo 10, 30 o 60 ml.' : 'Opcional si el artículo usa gramos u otra presentación.'}><input min="1" name="volumeMl" onChange={(event) => setVolume(event.target.value)} required={isPerfume} type="number" value={volume} /></AdminField>
+      <AdminField label="Precio MXN" description={isCatalogPrice ? 'Precio de venta vigente para esta variante.' : `Precio fijo de línea: $${LINE_VARIANT_DEFAULTS[line].fixedPrice} MXN.`}><input disabled={!isCatalogPrice} min="0.01" name="price" onChange={(event) => setPrice(event.target.value)} required={isCatalogPrice} step="0.01" type="number" value={price} /></AdminField>
       <AdminField label="Existencia inicial"><input defaultValue="0" min="0" name="initialStock" required type="number" /></AdminField>
-      <AdminField label="Avisar cuando queden"><input defaultValue="5" min="0" name="lowStockThreshold" type="number" /></AdminField>
+      <AdminField label="Avisar cuando queden" description="El panel mostrará una alerta al alcanzar esta cantidad."><input defaultValue="5" min="0" name="lowStockThreshold" required type="number" /></AdminField>
     </div>
     <div className="adminFormChecks"><label><input name="isFeatured" type="checkbox" /> Destacado</label><label><input name="isNew" type="checkbox" /> Novedad</label></div>
-    <button className="adminPrimaryButton adminPrimaryButton--wide" disabled={saving} type="submit">{saving ? <span className="buttonSpinner" /> : <><FilePlus2 size={16} /> Crear producto</>}</button>
+    <button className="adminPrimaryButton adminPrimaryButton--wide" disabled={saving || skuCheck.state !== 'available' || Boolean(catalogEditor) || !catalogLineSlugs.length} type="submit">{saving ? <span className="buttonSpinner" /> : <><FilePlus2 size={16} /> Crear producto</>}</button>
   </form>;
 }
 
 function ProductEditForm({
   product,
+  brands,
   categories,
-  scents,
+  navigation,
+  perfumeHouses,
   request,
   onSuccess,
 }: {
   product: AdminProduct;
+  brands: Brand[];
   categories: Category[];
-  scents: ScentFamily[];
+  navigation: CatalogNavigation;
+  perfumeHouses: PerfumeHouse[];
   request: AdminRequest;
   onSuccess: (message: string) => void;
 }) {
   const [saving, setSaving] = useState(false);
   const [productName, setProductName] = useState(product.name);
   const [images, setImages] = useState<ProductImage[]>(normalizeProductImages(product.images));
+  const [catalogLineSlugs, setCatalogLineSlugs] = useState(
+    product.catalogLines?.map((item) => item.catalogLine.slug) ?? [],
+  );
+  const [inspirationHouseSlug, setInspirationHouseSlug] = useState(
+    product.inspirationHouse?.slug ?? '',
+  );
   const choices = categoryChoices(categories);
   const selectedCategories = new Set(product.categories.map((item) => item.category.slug));
-  const selectedScents = new Set(product.scentFamilies.map((item) => item.scentFamily.slug));
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
     const selectedCategorySlugs = form.getAll('categorySlugs').map(String);
-    if (!selectedCategorySlugs.length) {
-      window.alert('Selecciona al menos una categoría.');
+    if (!selectedCategorySlugs.length || !catalogLineSlugs.length) {
+      window.alert('Selecciona al menos una categoría y una ubicación dentro del menú.');
       return;
     }
 
@@ -936,9 +1255,11 @@ function ProductEditForm({
           description: form.get('description') || '',
           seoTitle: String(form.get('seoTitle') ?? '').trim() || null,
           seoDescription: String(form.get('seoDescription') ?? '').trim() || null,
+          brandSlug: form.get('brandSlug'),
+          inspirationHouseSlug: inspirationHouseSlug || null,
           status: form.get('status'),
           categorySlugs: categorySlugsForSelection(categories, selectedCategorySlugs),
-          scentSlugs: form.getAll('scentSlugs'),
+          catalogLineSlugs,
           isFeatured: form.get('isFeatured') === 'on',
           isNew: form.get('isNew') === 'on',
           images: productImagesPayload(images),
@@ -957,9 +1278,11 @@ function ProductEditForm({
     <div className="adminFormGrid">
       <AdminField label="Nombre"><input defaultValue={product.name} name="name" onChange={(event) => setProductName(event.target.value)} required /></AdminField>
       <AdminField label="Estado"><select defaultValue={product.status} name="status"><option value="ACTIVE">Publicado</option><option value="DRAFT">Borrador</option><option value="ARCHIVED">Archivado</option></select></AdminField>
+      <AdminField label="Marca" description="Marca comercial que verá el cliente."><select defaultValue={product.brand?.slug ?? ''} name="brandSlug" required><option disabled value="">Selecciona una marca</option>{brands.map((brand) => <option key={brand.id} value={brand.slug}>{brand.name}</option>)}</select></AdminField>
+      <AdminField label="Casa perfumera de inspiración" description="Opcional. Permite navegar por Chanel, Dior y otras casas sin confundirlas con la marca comercial."><select name="inspirationHouseSlug" onChange={(event) => setInspirationHouseSlug(event.target.value)} value={inspirationHouseSlug}><option value="">No aplica</option>{perfumeHouses.map((house) => <option key={house.id} value={house.slug}>{house.name}</option>)}</select></AdminField>
     </div>
-    <AdminField label="Descripción corta"><input defaultValue={product.shortDescription ?? ''} maxLength={240} name="shortDescription" /></AdminField>
-    <AdminField label="Descripción"><textarea defaultValue={product.description ?? ''} name="description" rows={4} /></AdminField>
+    <AdminField label="Descripción corta"><input defaultValue={product.shortDescription ?? ''} maxLength={240} name="shortDescription" required /></AdminField>
+    <AdminField label="Descripción"><textarea defaultValue={product.description ?? ''} maxLength={4000} name="description" required rows={4} /></AdminField>
     <div className="adminFormDivider"><span>Vista previa en buscadores</span></div>
     <AdminField label="Título SEO (opcional)"><input defaultValue={product.seoTitle ?? ''} maxLength={70} name="seoTitle" placeholder="Si se deja vacío, se usa el nombre del producto" /></AdminField>
     <AdminField label="Descripción SEO (opcional)"><textarea defaultValue={product.seoDescription ?? ''} maxLength={170} name="seoDescription" placeholder="Resumen breve para Google y al compartir el enlace" rows={2} /></AdminField>
@@ -968,10 +1291,10 @@ function ProductEditForm({
       <legend>Categorías</legend>
       {choices.map(({ category, parent }) => <label key={category.id}><input defaultChecked={selectedCategories.has(category.slug)} name="categorySlugs" type="checkbox" value={category.slug} /><span><Check size={11} /></span>{parent ? `${parent.name} · ${category.name}` : category.name}</label>)}
     </fieldset>
-    <fieldset className="adminCheckGrid"><legend>Familias aromáticas</legend>{scents.map((scent) => <label key={scent.id}><input defaultChecked={selectedScents.has(scent.slug)} name="scentSlugs" type="checkbox" value={scent.slug} /><span><Check size={11} /></span>{scent.name}</label>)}</fieldset>
+    <CatalogLineSelector navigation={navigation} onChange={setCatalogLineSlugs} selectedSlugs={catalogLineSlugs} />
     <ProductImageManager images={images} onChange={setImages} productName={productName} request={request} />
     <div className="adminFormChecks"><label><input defaultChecked={product.isFeatured} name="isFeatured" type="checkbox" /> Destacado</label><label><input defaultChecked={product.isNew} name="isNew" type="checkbox" /> Novedad</label></div>
-    <button className="adminPrimaryButton adminPrimaryButton--wide" disabled={saving} type="submit">{saving ? <span className="buttonSpinner" /> : <><Check size={16} /> Guardar producto</>}</button>
+    <button className="adminPrimaryButton adminPrimaryButton--wide" disabled={saving || !catalogLineSlugs.length} type="submit">{saving ? <span className="buttonSpinner" /> : <><Check size={16} /> Guardar producto</>}</button>
   </form>;
 }
 
@@ -1115,12 +1438,91 @@ function PromotionForm({ promotion, request, onSuccess }: { promotion?: AdminPro
   </form>;
 }
 
-function ShipmentForm({ order, request, onSuccess }: { order: AdminOrder; request: AdminRequest; onSuccess: (message: string) => void }) { const [saving, setSaving] = useState(false); async function submit(event: FormEvent<HTMLFormElement>) { event.preventDefault(); const form = new FormData(event.currentTarget); setSaving(true); try { await request(`/admin/orders/${order.publicToken}/shipments`, { method: 'POST', body: JSON.stringify({ carrier: form.get('carrier'), service: form.get('service') || undefined, trackingNumber: form.get('trackingNumber'), trackingUrl: form.get('trackingUrl') || undefined, status: 'LABEL_CREATED', estimatedDeliveryAt: form.get('estimatedDeliveryAt') ? new Date(String(form.get('estimatedDeliveryAt'))).toISOString() : undefined, notes: form.get('notes') || undefined }) }); onSuccess('Guía registrada y cliente notificado.'); } catch (error) { window.alert(errorMessage(error)); } finally { setSaving(false); } } return <form className="adminForm" onSubmit={submit}><div className="adminFormContext"><Truck size={19} /><div><strong>{order.number}</strong><small>{order.customerName} · {formatMoney(order.totalCents, order.currency)}</small></div></div><div className="adminFormGrid"><AdminField label="Paquetería"><input name="carrier" placeholder="DHL, Estafeta..." required /></AdminField><AdminField label="Servicio"><input name="service" placeholder="Express" /></AdminField></div><AdminField label="Código de rastreo"><input name="trackingNumber" required /></AdminField><AdminField label="URL HTTPS de seguimiento"><input name="trackingUrl" placeholder="https://..." type="url" /></AdminField><AdminField label="Entrega estimada"><input name="estimatedDeliveryAt" type="datetime-local" /></AdminField><AdminField label="Notas internas"><textarea maxLength={500} name="notes" rows={3} /></AdminField><button className="adminPrimaryButton adminPrimaryButton--wide" disabled={saving} type="submit">{saving ? <span className="buttonSpinner" /> : <><Truck size={15} /> Registrar guía</>}</button></form>; }
+const DELIVERY_METHOD_LABELS: Record<string, string> = {
+  SHIPPING: 'Envío nacional',
+  LOCAL_DELIVERY: 'Entrega local',
+  STORE_PICKUP: 'Recoger en tienda',
+};
+
+const PAYMENT_METHOD_ADMIN_LABELS: Record<string, string> = {
+  CARD: 'Tarjeta en línea',
+  PAYMENT_LINK: 'Link de Mercado Pago',
+  BANK_TRANSFER: 'Transferencia',
+  CASH: 'Efectivo al recoger',
+};
+
+function DeliverySummary({ order }: { order: AdminOrder }) {
+  const address = order.shippingAddress;
+  return <section className="adminDeliverySummary">
+    <div className="adminDeliverySummary__method">
+      {order.deliveryMethod === 'STORE_PICKUP' ? <Store size={18} /> : <Truck size={18} />}
+      <div><small>Modalidad</small><strong>{DELIVERY_METHOD_LABELS[order.deliveryMethod] ?? order.deliveryMethod}</strong></div>
+    </div>
+    <dl>
+      <div><dt><CreditCard size={14} /> Pago</dt><dd>{PAYMENT_METHOD_ADMIN_LABELS[order.paymentMethod] ?? order.paymentMethod}</dd></div>
+      <div><dt><Mail size={14} /> Correo</dt><dd>{order.customerEmail || 'No registrado'}</dd></div>
+      <div><dt><Phone size={14} /> Teléfono</dt><dd>{order.customerPhone || String(address?.phone ?? '') || 'No registrado'}</dd></div>
+      {address && <>
+        <div><dt><MapPin size={14} /> Recibe</dt><dd>{String(address.recipientName ?? order.customerName)}</dd></div>
+        <div className="adminDeliverySummary__wide"><dt>Dirección</dt><dd>{String(address.street ?? '')} {String(address.exteriorNumber ?? '')}{address.interiorNumber ? `, Int. ${String(address.interiorNumber)}` : ''}<br />{String(address.neighborhood ?? '')}, {String(address.city ?? '')}{address.municipality ? `, ${String(address.municipality)}` : ''}<br />{String(address.state ?? '')}, C.P. {String(address.postalCode ?? '')}, {String(address.country ?? 'MX')}</dd></div>
+        {address.reference && <div className="adminDeliverySummary__wide"><dt>Referencias</dt><dd>{String(address.reference)}</dd></div>}
+      </>}
+      {order.customerNotes && <div className="adminDeliverySummary__wide"><dt>Nota del cliente</dt><dd>{order.customerNotes}</dd></div>}
+    </dl>
+    {order.deliveryMethod !== 'STORE_PICKUP' && !address && <p className="adminDeliverySummary__warning"><AlertTriangle size={15} /> Este pedido no tiene una dirección guardada. Revísalo antes de preparar el envío.</p>}
+  </section>;
+}
+
+function DeliveryDetails({ order }: { order: AdminOrder }) {
+  return <div className="adminForm">
+    <div className="adminFormContext"><MapPin size={19} /><div><strong>{order.number}</strong><small>{order.customerName} · {formatMoney(order.totalCents, order.currency)}</small></div></div>
+    <DeliverySummary order={order} />
+  </div>;
+}
+
+function ShipmentForm({ order, request, onSuccess }: { order: AdminOrder; request: AdminRequest; onSuccess: (message: string) => void }) {
+  const [saving, setSaving] = useState(false);
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    setSaving(true);
+    try {
+      await request(`/admin/orders/${order.publicToken}/shipments`, {
+        method: 'POST',
+        body: JSON.stringify({
+          carrier: form.get('carrier'),
+          service: form.get('service') || undefined,
+          trackingNumber: form.get('trackingNumber'),
+          trackingUrl: form.get('trackingUrl') || undefined,
+          status: 'LABEL_CREATED',
+          estimatedDeliveryAt: form.get('estimatedDeliveryAt') ? new Date(String(form.get('estimatedDeliveryAt'))).toISOString() : undefined,
+          notes: form.get('notes') || undefined,
+        }),
+      });
+      onSuccess('Guía registrada y cliente notificado.');
+    } catch (error) {
+      window.alert(errorMessage(error));
+    } finally {
+      setSaving(false);
+    }
+  }
+  return <form className="adminForm" onSubmit={submit}>
+    <div className="adminFormContext"><Truck size={19} /><div><strong>{order.number}</strong><small>{order.customerName} · {formatMoney(order.totalCents, order.currency)}</small></div></div>
+    <DeliverySummary order={order} />
+    <div className="adminFormDivider"><span>Datos de la guía</span></div>
+    <div className="adminFormGrid"><AdminField label="Paquetería"><input name="carrier" placeholder="DHL, Estafeta..." required /></AdminField><AdminField label="Servicio"><input name="service" placeholder="Express" /></AdminField></div>
+    <AdminField label="Código de rastreo"><input name="trackingNumber" required /></AdminField>
+    <AdminField label="URL HTTPS de seguimiento"><input name="trackingUrl" placeholder="https://..." type="url" /></AdminField>
+    <AdminField label="Entrega estimada"><input name="estimatedDeliveryAt" type="datetime-local" /></AdminField>
+    <AdminField label="Notas internas"><textarea maxLength={500} name="notes" rows={3} /></AdminField>
+    <button className="adminPrimaryButton adminPrimaryButton--wide" disabled={saving} type="submit">{saving ? <span className="buttonSpinner" /> : <><Truck size={15} /> Registrar guía</>}</button>
+  </form>;
+}
 
 function AdminModal({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) { return <div className="adminModal"><button aria-label="Cerrar" className="adminModal__backdrop" onClick={onClose} type="button" /><section><header><div><span className="adminEyebrow">Operación segura</span><h2>{title}</h2></div><button aria-label="Cerrar" onClick={onClose} type="button"><X size={19} /></button></header>{children}</section></div>; }
 function AdminHeading({ eyebrow, title, description, action }: { eyebrow: string; title: string; description: string; action?: React.ReactNode }) { return <div className="adminPageHeading"><div><span className="adminEyebrow">{eyebrow}</span><h1>{title}</h1><p>{description}</p></div>{action}</div>; }
 function AdminSearch({ value, onChange, placeholder }: { value: string; onChange: (value: string) => void; placeholder: string }) { return <label className="adminSearch"><Search size={16} /><input onChange={(event) => onChange(event.target.value)} placeholder={placeholder} value={value} />{value && <button aria-label="Limpiar" onClick={() => onChange('')} type="button"><X size={14} /></button>}</label>; }
-function AdminField({ label, children }: { label: string; children: React.ReactNode }) { return <label className="adminField"><span>{label}</span>{children}</label>; }
+function AdminField({ label, description, children }: { label: string; description?: string; children: React.ReactNode }) { return <label className="adminField"><span>{label}</span>{description && <small>{description}</small>}{children}</label>; }
 function Metric({ icon: Icon, label, value, note, tone }: { icon: typeof BarChart3; label: string; value: string; note: string; tone: string }) { return <article className={`adminMetric adminMetric--${tone}`}><span><Icon size={19} /></span><small>{label}</small><strong>{value}</strong><p>{note}</p></article>; }
 function AdminLoading() { return <div className="adminLoading"><span /><div>{Array.from({ length: 4 }, (_, index) => <i key={index} />)}</div><b /></div>; }
-function modalTitle(modal: string) { return ({ product: 'Nuevo producto', 'product-edit': 'Editar producto', 'product-images': 'Fotografías del producto', inventory: 'Ajustar inventario', promotion: 'Nueva promoción', 'promotion-edit': 'Editar promoción', shipment: 'Registrar guía', price: 'Actualizar precio' } as Record<string, string>)[modal] ?? 'Administrar'; }
+function modalTitle(modal: string) { return ({ product: 'Nuevo producto', 'product-edit': 'Editar producto', 'product-images': 'Fotografías del producto', inventory: 'Ajustar inventario', promotion: 'Nueva promoción', 'promotion-edit': 'Editar promoción', shipment: 'Registrar guía', delivery: 'Datos de entrega', price: 'Actualizar precio' } as Record<string, string>)[modal] ?? 'Administrar'; }

@@ -23,6 +23,8 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   const publicPages = [
     '',
     '/productos',
+    '/inspiraciones',
+    '/colecciones',
     '/promociones',
     '/pedidos-especiales',
     '/guia-de-perfumes',

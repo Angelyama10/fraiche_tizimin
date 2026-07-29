@@ -7,8 +7,12 @@ import {
   StockMovementType,
 } from '@prisma/client';
 import {
+  CreateBrandDto,
+  CreateCategoryDto,
+  CreatePerfumeHouseDto,
   CreateProductDto,
   CreateProductVariantDto,
+  SkuAvailabilityQueryDto,
   UpdateInventoryDto,
   UpdateProductDto,
   UpdateSpecialRequestDto,
@@ -21,12 +25,30 @@ export class AdminService {
   constructor(private readonly prisma: PrismaService) {}
 
   async createProduct(input: CreateProductDto, actorId: string) {
+    const normalizedSlug = input.slug.trim().toLowerCase();
+    const normalizedSkus = input.variants.map((variant) => this.normalizeSku(variant.sku));
+    if (new Set(normalizedSkus).size !== normalizedSkus.length) {
+      throw new ConflictException('Hay variantes con el mismo SKU dentro del formulario.');
+    }
+    const [existingProduct, existingVariants] = await Promise.all([
+      this.prisma.product.findUnique({
+        where: { slug: normalizedSlug },
+        select: { id: true },
+      }),
+      this.prisma.productVariant.findMany({
+        where: { sku: { in: normalizedSkus } },
+        select: { sku: true },
+      }),
+    ]);
+    if (existingProduct) throw new ConflictException('Ya existe un producto con este slug.');
+    if (existingVariants.length) {
+      throw new ConflictException(`El SKU ${existingVariants[0].sku} ya pertenece a otro articulo.`);
+    }
+
     const policy = await this.prisma.linePricingPolicy.findUnique({ where: { line: input.line } });
     if (!policy) throw new BadRequestException('La linea no tiene politica de precios.');
-    const brand = input.brandSlug
-      ? await this.prisma.brand.findUnique({ where: { slug: input.brandSlug } })
-      : null;
-    if (input.brandSlug && !brand) throw new BadRequestException('La marca no existe.');
+    const brand = await this.prisma.brand.findUnique({ where: { slug: input.brandSlug } });
+    if (!brand) throw new BadRequestException('La marca no existe.');
 
     const categories = await this.prisma.category.findMany({
       where: { slug: { in: [...new Set(input.categorySlugs)] }, isActive: true },
@@ -34,11 +56,20 @@ export class AdminService {
     if (categories.length !== new Set(input.categorySlugs).size) {
       throw new BadRequestException('Una o mas categorias no existen.');
     }
-    const scentFamilies = await this.prisma.scentFamily.findMany({
-      where: { slug: { in: [...new Set(input.scentSlugs)] } },
+    const catalogLineSlugs = [...new Set(input.catalogLineSlugs)];
+    const catalogLines = await this.prisma.catalogLine.findMany({
+      where: { slug: { in: catalogLineSlugs }, isActive: true, section: { isActive: true } },
     });
-    if (scentFamilies.length !== new Set(input.scentSlugs).size) {
-      throw new BadRequestException('Una o mas familias aromaticas no existen.');
+    if (catalogLines.length !== catalogLineSlugs.length) {
+      throw new BadRequestException('Una o mas lineas de catalogo no existen.');
+    }
+    const inspirationHouse = input.inspirationHouseSlug
+      ? await this.prisma.perfumeHouse.findFirst({
+          where: { slug: input.inspirationHouseSlug, isActive: true },
+        })
+      : null;
+    if (input.inspirationHouseSlug && !inspirationHouse) {
+      throw new BadRequestException('La casa perfumera no existe.');
     }
     for (const variant of input.variants) this.validateVariant(input.line, policy.pricingMode, variant);
 
@@ -51,7 +82,7 @@ export class AdminService {
       return await this.prisma.$transaction(async (transaction) => {
         const product = await transaction.product.create({
           data: {
-            slug: input.slug.trim().toLowerCase(),
+            slug: normalizedSlug,
             name: input.name.trim(),
             shortDescription: input.shortDescription?.trim(),
             description: input.description?.trim(),
@@ -59,14 +90,15 @@ export class AdminService {
             seoDescription: input.seoDescription?.trim(),
             line: input.line,
             status: input.status ?? ProductStatus.DRAFT,
-            brandId: brand?.id,
+            brandId: brand.id,
+            inspirationHouseId: inspirationHouse?.id,
             isFeatured: input.isFeatured ?? false,
             isNew: input.isNew ?? false,
             categories: {
               create: categories.map((category) => ({ categoryId: category.id })),
             },
-            scentFamilies: {
-              create: scentFamilies.map((scentFamily) => ({ scentFamilyId: scentFamily.id })),
+            catalogLines: {
+              create: catalogLines.map((catalogLine) => ({ catalogLineId: catalogLine.id })),
             },
             images: {
               create: input.images.map((image, index) => ({
@@ -79,11 +111,21 @@ export class AdminService {
           },
         });
 
+        if (inspirationHouse) {
+          await transaction.catalogLineHouse.createMany({
+            data: catalogLines.map((catalogLine) => ({
+              catalogLineId: catalogLine.id,
+              perfumeHouseId: inspirationHouse.id,
+            })),
+            skipDuplicates: true,
+          });
+        }
+
         for (const variantInput of input.variants) {
           const variant = await transaction.productVariant.create({
             data: {
               productId: product.id,
-              sku: variantInput.sku.trim().toUpperCase(),
+              sku: this.normalizeSku(variantInput.sku),
               name: variantInput.name.trim(),
               concentrationLabel: variantInput.concentrationLabel?.trim(),
               concentrationPercent: variantInput.concentrationPercent,
@@ -143,7 +185,8 @@ export class AdminService {
       include: {
         images: { orderBy: { sortOrder: 'asc' } },
         categories: true,
-        scentFamilies: true,
+        catalogLines: true,
+        inspirationHouse: true,
       },
     });
     if (!before) throw new NotFoundException('Producto no encontrado.');
@@ -159,22 +202,43 @@ export class AdminService {
     if (categories && categories.length !== categorySlugs?.length) {
       throw new BadRequestException('Una o más categorías no existen.');
     }
-
-    const scentSlugs = input.scentSlugs
-      ? [...new Set(input.scentSlugs)]
+    const catalogLineSlugs = input.catalogLineSlugs
+      ? [...new Set(input.catalogLineSlugs)]
       : undefined;
-    const scentFamilies = scentSlugs
-      ? await this.prisma.scentFamily.findMany({
-          where: { slug: { in: scentSlugs } },
+    const catalogLines = catalogLineSlugs
+      ? await this.prisma.catalogLine.findMany({
+          where: {
+            slug: { in: catalogLineSlugs },
+            isActive: true,
+            section: { isActive: true },
+          },
         })
       : undefined;
-    if (scentFamilies && scentFamilies.length !== scentSlugs?.length) {
-      throw new BadRequestException('Una o más familias aromáticas no existen.');
+    if (catalogLines && catalogLines.length !== catalogLineSlugs?.length) {
+      throw new BadRequestException('Una o más líneas de catálogo no existen.');
+    }
+
+    const brand = input.brandSlug
+      ? await this.prisma.brand.findUnique({ where: { slug: input.brandSlug } })
+      : undefined;
+    if (input.brandSlug && !brand) throw new BadRequestException('La marca no existe.');
+    const inspirationHouse =
+      input.inspirationHouseSlug === undefined
+        ? undefined
+        : input.inspirationHouseSlug
+          ? await this.prisma.perfumeHouse.findFirst({
+              where: { slug: input.inspirationHouseSlug, isActive: true },
+            })
+          : null;
+    if (input.inspirationHouseSlug && !inspirationHouse) {
+      throw new BadRequestException('La casa perfumera no existe.');
     }
 
     const {
       categorySlugs: _categorySlugs,
-      scentSlugs: _scentSlugs,
+      catalogLineSlugs: _catalogLineSlugs,
+      brandSlug: _brandSlug,
+      inspirationHouseSlug: _inspirationHouseSlug,
       images,
       ...productFields
     } = input;
@@ -199,6 +263,10 @@ export class AdminService {
         where: { id },
         data: {
           ...normalizedProductFields,
+          ...(brand ? { brandId: brand.id } : {}),
+          ...(inspirationHouse !== undefined
+            ? { inspirationHouseId: inspirationHouse?.id ?? null }
+            : {}),
           ...(categories
             ? {
                 categories: {
@@ -209,12 +277,12 @@ export class AdminService {
                 },
               }
             : {}),
-          ...(scentFamilies
+          ...(catalogLines
             ? {
-                scentFamilies: {
+                catalogLines: {
                   deleteMany: {},
-                  create: scentFamilies.map((scentFamily) => ({
-                    scentFamilyId: scentFamily.id,
+                  create: catalogLines.map((catalogLine) => ({
+                    catalogLineId: catalogLine.id,
                   })),
                 },
               }
@@ -236,10 +304,28 @@ export class AdminService {
         },
         include: {
           images: { orderBy: { sortOrder: 'asc' } },
+          brand: true,
+          inspirationHouse: true,
           categories: { include: { category: true } },
-          scentFamilies: { include: { scentFamily: true } },
+          catalogLines: { include: { catalogLine: { include: { section: true } } } },
         },
       });
+      const effectiveHouseId =
+        inspirationHouse === undefined
+          ? before.inspirationHouseId
+          : inspirationHouse?.id ?? null;
+      const effectiveCatalogLineIds =
+        catalogLines?.map((catalogLine) => catalogLine.id) ??
+        before.catalogLines.map((catalogLine) => catalogLine.catalogLineId);
+      if (effectiveHouseId) {
+        await transaction.catalogLineHouse.createMany({
+          data: effectiveCatalogLineIds.map((catalogLineId) => ({
+            catalogLineId,
+            perfumeHouseId: effectiveHouseId,
+          })),
+          skipDuplicates: true,
+        });
+      }
       await transaction.auditLog.create({
         data: {
           actorId,
@@ -252,6 +338,118 @@ export class AdminService {
       });
       return product;
     });
+  }
+
+  async skuAvailability(query: SkuAvailabilityQueryDto) {
+    const sku = this.normalizeSku(query.sku);
+    const variant = await this.prisma.productVariant.findUnique({
+      where: { sku },
+      select: {
+        id: true,
+        sku: true,
+        product: { select: { id: true, name: true, slug: true } },
+      },
+    });
+    return {
+      sku,
+      available: !variant,
+      conflict: variant
+        ? {
+            variantId: variant.id,
+            productId: variant.product.id,
+            productName: variant.product.name,
+            productSlug: variant.product.slug,
+          }
+        : null,
+    };
+  }
+
+  async createBrand(input: CreateBrandDto, actorId: string) {
+    const slug = input.slug?.trim() || this.toSlug(input.name);
+    try {
+      const brand = await this.prisma.brand.create({
+        data: { name: input.name.trim(), slug },
+      });
+      await this.prisma.auditLog.create({
+        data: {
+          actorId,
+          action: 'BRAND_CREATED',
+          entityType: 'Brand',
+          entityId: brand.id,
+          after: brand as unknown as Prisma.InputJsonValue,
+        },
+      });
+      return brand;
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+        throw new ConflictException('Ya existe una marca con ese nombre o slug.');
+      }
+      throw error;
+    }
+  }
+
+  async createCategory(input: CreateCategoryDto, actorId: string) {
+    const slug = input.slug?.trim() || this.toSlug(input.name);
+    const parent = input.parentSlug
+      ? await this.prisma.category.findUnique({ where: { slug: input.parentSlug } })
+      : null;
+    if (input.parentSlug && !parent) {
+      throw new BadRequestException('La categoria superior no existe.');
+    }
+    try {
+      const category = await this.prisma.category.create({
+        data: {
+          name: input.name.trim(),
+          slug,
+          description: input.description?.trim() || null,
+          parentId: parent?.id,
+        },
+        include: { parent: true, children: true },
+      });
+      await this.prisma.auditLog.create({
+        data: {
+          actorId,
+          action: 'CATEGORY_CREATED',
+          entityType: 'Category',
+          entityId: category.id,
+          after: category as unknown as Prisma.InputJsonValue,
+        },
+      });
+      return category;
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+        throw new ConflictException('Ya existe una categoria con ese nombre o slug.');
+      }
+      throw error;
+    }
+  }
+
+  async createPerfumeHouse(input: CreatePerfumeHouseDto, actorId: string) {
+    const slug = input.slug?.trim() || this.toSlug(input.name);
+    try {
+      const house = await this.prisma.perfumeHouse.create({
+        data: {
+          name: input.name.trim(),
+          slug,
+          description: input.description?.trim() || null,
+        },
+      });
+      await this.prisma.auditLog.create({
+        data: {
+          actorId,
+          action: 'PERFUME_HOUSE_CREATED',
+          entityType: 'PerfumeHouse',
+          entityId: house.id,
+          after: house as unknown as Prisma.InputJsonValue,
+        },
+      });
+      return house;
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+        throw new ConflictException('Ya existe una casa perfumera con ese nombre o slug.');
+      }
+      throw error;
+    }
   }
 
   async updateVariant(id: string, input: UpdateVariantDto, actorId: string) {
@@ -364,14 +562,26 @@ export class AdminService {
     if (pricingMode === PricingMode.CATALOG && variant.catalogPriceCents === undefined) {
       throw new BadRequestException(`La variante ${variant.sku} necesita precio de catalogo.`);
     }
-    if (line !== ProductLine.PERSONAL_CARE && variant.volumeMl !== 60) {
-      throw new BadRequestException(`La linea ${line} requiere presentacion de 60 ml.`);
-    }
     if (
       (line === ProductLine.DESIGNER_37 || line === ProductLine.PREMIUM) &&
       variant.concentrationPercent !== 37
     ) {
       throw new BadRequestException(`La linea ${line} requiere concentracion de 37%.`);
     }
+  }
+
+  private normalizeSku(sku: string) {
+    return sku.trim().toUpperCase();
+  }
+
+  private toSlug(value: string) {
+    const slug = value
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '');
+    if (!slug) throw new BadRequestException('No fue posible generar un slug valido.');
+    return slug;
   }
 }

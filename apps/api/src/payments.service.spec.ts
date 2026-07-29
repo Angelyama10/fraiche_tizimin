@@ -132,7 +132,10 @@ test('Mercado Pago cobra el total y correo guardados en la orden', async () => {
   };
   const transaction = {
     payment: { update: async () => payment },
-    order: { update: async () => order },
+    order: {
+      findUnique: async () => order,
+      update: async () => order,
+    },
   };
   const prisma = {
     order: {
@@ -269,7 +272,10 @@ test('Stripe no reembolsa cuando otra solicitud ya confirmo y consumio la reserv
           amount_received: 1_000,
           currency: 'mxn',
           status: 'succeeded',
-          metadata: { orderToken: pendingOrder.publicToken },
+          metadata: {
+            orderToken: pendingOrder.publicToken,
+            paymentId: payment.id,
+          },
           last_payment_error: null,
         }),
       },
@@ -349,7 +355,7 @@ test('Stripe conserva el reembolso automatico para una reserva realmente expirad
       update: async () => expiredOrder,
     },
     payment: {
-      findFirst: async () => payment,
+      findUnique: async () => payment,
       update: async () => payment,
     },
     $transaction: async (operations: Array<Promise<unknown>>) => Promise.all(operations),
@@ -364,7 +370,10 @@ test('Stripe conserva el reembolso automatico para una reserva realmente expirad
           amount_received: 1_000,
           currency: 'mxn',
           status: 'succeeded',
-          metadata: { orderToken: expiredOrder.publicToken },
+          metadata: {
+            orderToken: expiredOrder.publicToken,
+            paymentId: payment.id,
+          },
           last_payment_error: null,
         }),
       },
@@ -381,4 +390,131 @@ test('Stripe conserva el reembolso automatico para una reserva realmente expirad
 
   assert.equal(result.status, PaymentStatus.REFUNDED);
   assert.equal(refundCalls, 1);
+});
+
+test('Stripe reembolsa un intento sustituido sin alterar la nueva forma de pago', async () => {
+  const oldPayment = {
+    id: 'payment-stripe-old',
+    orderId: 'order-stripe-updated',
+    provider: PaymentProvider.STRIPE,
+    method: PaymentMethod.CARD,
+    status: PaymentStatus.CANCELLED,
+    amountCents: 1_000,
+    currency: 'MXN',
+    providerPaymentId: 'pi_old_succeeded',
+    providerPreferenceId: null,
+    checkoutUrl: null,
+    statusDetail: 'payment_method_changed_by_customer',
+    providerResponse: null,
+    approvedAt: null,
+    createdAt: new Date(Date.now() - 60_000),
+    updatedAt: new Date(),
+  };
+  const currentPayment = {
+    ...oldPayment,
+    id: 'payment-transfer-current',
+    provider: PaymentProvider.MANUAL,
+    method: PaymentMethod.BANK_TRANSFER,
+    status: PaymentStatus.PENDING,
+    providerPaymentId: null,
+    statusDetail: 'created_after_checkout_update',
+    createdAt: new Date(),
+  };
+  const order = {
+    id: 'order-stripe-updated',
+    publicToken: 'stripe-updated-token',
+    number: 'FTZ-UPDATED',
+    idempotencyKey: 'stripe-updated-idempotency',
+    customerId: 'customer-1',
+    customerName: 'Cliente',
+    customerEmail: 'cliente@example.com',
+    customerPhone: '9990000000',
+    status: OrderStatus.PENDING_PAYMENT,
+    paymentStatus: PaymentStatus.PENDING,
+    fulfillmentStatus: FulfillmentStatus.UNFULFILLED,
+    paymentMethod: PaymentMethod.BANK_TRANSFER,
+    deliveryMethod: DeliveryMethod.SHIPPING,
+    shippingAddress: null,
+    currency: 'MXN',
+    subtotalCents: 1_000,
+    discountCents: 0,
+    shippingCents: 0,
+    totalCents: 1_000,
+    customerNotes: null,
+    internalNotes: null,
+    expiresAt: new Date(Date.now() + 60 * 60 * 1000),
+    paidAt: null,
+    cancelledAt: null,
+    createdAt: new Date(),
+    updatedAt: new Date(),
+    items: [],
+    payments: [currentPayment, oldPayment],
+  };
+  let refundCalls = 0;
+  let orderUpdates = 0;
+  let paymentUpdates = 0;
+  const prisma = {
+    order: {
+      findFirst: async () => order,
+      update: async () => {
+        orderUpdates += 1;
+        return order;
+      },
+    },
+    payment: {
+      findUnique: async () => oldPayment,
+      update: async () => {
+        paymentUpdates += 1;
+        return { ...oldPayment, status: PaymentStatus.REFUNDED };
+      },
+    },
+    webhookEvent: {
+      create: async () => undefined,
+      update: async () => undefined,
+    },
+    $transaction: async (operations: Array<Promise<unknown>>) => Promise.all(operations),
+  } as unknown as PrismaService;
+  const intent = {
+    id: 'pi_old_succeeded',
+    amount: 1_000,
+    amount_received: 1_000,
+    currency: 'mxn',
+    status: 'succeeded',
+    metadata: {
+      orderToken: order.publicToken,
+      paymentId: oldPayment.id,
+    },
+    last_payment_error: null,
+  };
+  const service = new PaymentsService(
+    prisma,
+    configService({ STRIPE_WEBHOOK_SECRET: 'whsec_test' }),
+  );
+  Object.assign(service, {
+    stripeClient: () => ({
+      webhooks: {
+        constructEvent: () => ({
+          id: 'evt_superseded',
+          type: 'payment_intent.succeeded',
+          data: { object: intent },
+        }),
+      },
+      refunds: {
+        create: async () => {
+          refundCalls += 1;
+          return { id: 're_superseded' };
+        },
+      },
+    }),
+  });
+
+  const result = await service.receiveStripeWebhook(
+    Buffer.from('stripe-event'),
+    'stripe-signature',
+  );
+
+  assert.deepEqual(result, { received: true });
+  assert.equal(refundCalls, 1);
+  assert.equal(paymentUpdates, 1);
+  assert.equal(orderUpdates, 0);
 });

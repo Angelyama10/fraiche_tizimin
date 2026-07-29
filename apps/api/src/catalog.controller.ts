@@ -10,9 +10,24 @@ export class CatalogController {
     return this.catalog.categories();
   }
 
-  @Get('scent-families')
-  scentFamilies() {
-    return this.catalog.scentFamilies();
+  @Get('brands')
+  brands() {
+    return this.catalog.brands();
+  }
+
+  @Get('perfume-houses')
+  perfumeHouses() {
+    return this.catalog.perfumeHouses();
+  }
+
+  @Get('catalog/navigation')
+  navigation() {
+    return this.catalog.navigation();
+  }
+
+  @Get('catalog/inspirations')
+  inspirations() {
+    return this.catalog.inspirations();
   }
 
   @Get('promotions')

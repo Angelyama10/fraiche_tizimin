@@ -19,7 +19,11 @@ export default async function StorefrontPreviewPage({ searchParams }: { searchPa
     ]);
     return (
       <StorefrontPreviewFrame content={preview.content}>
-        <HomeStorefront content={preview.content} products={data.products} promotions={data.promotions} scents={data.scents} />
+        <HomeStorefront
+          content={preview.content}
+          products={data.products}
+          promotions={data.promotions}
+        />
       </StorefrontPreviewFrame>
     );
   } catch {

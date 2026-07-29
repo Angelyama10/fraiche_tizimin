@@ -1,0 +1,233 @@
+.inspirationsPage {
+  padding-bottom: 110px;
+  background: #f8faf8;
+}
+
+.inspirationsHero {
+  position: relative;
+  display: flex;
+  min-height: min(560px, 68svh);
+  align-items: flex-end;
+  overflow: hidden;
+  background: var(--emerald);
+  color: var(--white);
+}
+
+.inspirationsHero::after {
+  position: absolute;
+  background:
+    linear-gradient(90deg, rgba(6, 36, 30, 0.9) 0%, rgba(6, 36, 30, 0.58) 46%, rgba(6, 36, 30, 0.12) 100%),
+    linear-gradient(0deg, rgba(6, 36, 30, 0.72), transparent 48%);
+  content: '';
+  inset: 0;
+}
+
+.inspirationsHero > img {
+  object-fit: cover;
+}
+
+.inspirationsHero > div {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  padding-block: 70px 58px;
+  padding-inline: 16px;
+}
+
+.inspirationsHero h1 {
+  max-width: 760px;
+  margin: 12px 0 18px;
+  font-size: 48px;
+  line-height: 0.96;
+}
+
+.inspirationsHero p {
+  max-width: 590px;
+  margin: 0 0 26px;
+  color: rgba(255, 255, 255, 0.82);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.inspirationsDirectory {
+  padding-top: 68px;
+}
+
+.inspirationsDirectory > header {
+  display: grid;
+  padding-bottom: 38px;
+  border-bottom: 1px solid var(--line-dark);
+  gap: 18px;
+}
+
+.inspirationsDirectory > header h2 {
+  max-width: 700px;
+  margin: 10px 0 0;
+  font-size: 45px;
+  line-height: 0.98;
+}
+
+.inspirationsDirectory > header > p {
+  max-width: 500px;
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: 11px;
+  line-height: 1.65;
+}
+
+.inspirationGroups {
+  display: grid;
+}
+
+.inspirationGroup {
+  padding-block: 44px;
+  border-bottom: 1px solid var(--line-dark);
+  scroll-margin-top: 100px;
+}
+
+.inspirationGroup__heading {
+  display: grid;
+  align-items: start;
+  grid-template-columns: 42px minmax(0, 1fr);
+  gap: 12px;
+}
+
+.inspirationGroup__heading > span {
+  padding-top: 9px;
+  color: var(--coral-dark);
+  font-size: 10px;
+  font-weight: 900;
+}
+
+.inspirationGroup__heading h2 {
+  margin: 0;
+  font-size: 38px;
+  line-height: 1;
+}
+
+.inspirationGroup__heading p {
+  margin: 8px 0 0;
+  color: var(--ink-soft);
+  font-size: 10px;
+}
+
+.inspirationGroup__lines {
+  display: flex;
+  margin: 22px 0;
+  padding-left: 54px;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.inspirationGroup__lines a {
+  display: inline-flex;
+  min-height: 38px;
+  align-items: center;
+  border: 1px solid var(--line-dark);
+  border-radius: 999px;
+  padding: 0 13px;
+  background: var(--white);
+  font-size: 9px;
+  font-weight: 800;
+  gap: 6px;
+}
+
+.perfumeHouseDirectory {
+  display: grid;
+  padding-left: 54px;
+  border-top: 1px solid var(--line);
+}
+
+.perfumeHouseDirectory a {
+  display: grid;
+  min-height: 78px;
+  align-items: center;
+  border-bottom: 1px solid var(--line);
+  grid-template-columns: 38px minmax(0, 1fr) auto;
+  gap: 10px;
+}
+
+.perfumeHouseDirectory a > span {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--mint);
+  color: var(--emerald);
+}
+
+.perfumeHouseDirectory strong {
+  font-family: var(--font-display), var(--font-display-fallback);
+  font-size: 21px;
+}
+
+.perfumeHouseDirectory small {
+  display: none;
+  color: var(--ink-soft);
+  font-size: 8px;
+}
+
+.perfumeHouseDirectory a > svg {
+  color: var(--emerald);
+}
+
+.inspirationGroup__empty {
+  display: flex;
+  min-height: 110px;
+  align-items: center;
+  margin-left: 54px;
+  border: 1px dashed var(--line-dark);
+  padding: 20px;
+  color: var(--ink-soft);
+  gap: 14px;
+}
+
+.inspirationGroup__empty strong {
+  color: var(--ink);
+  font-size: 11px;
+}
+
+.inspirationGroup__empty p {
+  max-width: 620px;
+  margin: 5px 0 0;
+  font-size: 9px;
+  line-height: 1.55;
+}
+
+@media (min-width: 760px) {
+  .inspirationsHero > div {
+    padding-inline: 0;
+  }
+
+  .inspirationsHero h1 {
+    font-size: 72px;
+    line-height: 0.92;
+  }
+
+  .inspirationsDirectory > header {
+    align-items: end;
+    grid-template-columns: minmax(0, 1fr) 420px;
+  }
+
+  .perfumeHouseDirectory {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .perfumeHouseDirectory a:nth-child(odd) {
+    padding-right: 22px;
+    border-right: 1px solid var(--line);
+  }
+
+  .perfumeHouseDirectory a:nth-child(even) {
+    padding-left: 22px;
+  }
+
+  .perfumeHouseDirectory a {
+    grid-template-columns: 38px minmax(0, 1fr) auto auto;
+  }
+
+  .perfumeHouseDirectory small {
+    display: block;
+  }
+}

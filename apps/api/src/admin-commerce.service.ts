@@ -173,10 +173,11 @@ export class AdminCommerceService {
         where,
         include: {
           brand: true,
+          inspirationHouse: true,
           linePricingPolicy: true,
           images: { orderBy: { sortOrder: 'asc' } },
           categories: { include: { category: true } },
-          scentFamilies: { include: { scentFamily: true } },
+          catalogLines: { include: { catalogLine: { include: { section: true } } } },
           variants: {
             include: { inventoryLevels: { include: { location: true } } },
             orderBy: { createdAt: 'asc' },

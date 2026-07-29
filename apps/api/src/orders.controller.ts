@@ -1,8 +1,8 @@
-import { Body, Controller, Get, Headers, Param, Post, Query, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, Headers, Param, Patch, Post, Query, Req, UseGuards } from '@nestjs/common';
 import type { Request } from 'express';
 import { CustomerJwtAuthGuard } from './customer-auth.guard';
 import { AuthenticatedCustomer } from './customer-jwt.strategy';
-import { CreateOrderDto, ListCustomerOrdersDto } from './order.dto';
+import { CreateOrderDto, ListCustomerOrdersDto, UpdatePendingOrderDto } from './order.dto';
 import { OrdersService } from './orders.service';
 
 type CustomerRequest = Request & { user: AuthenticatedCustomer };
@@ -29,6 +29,15 @@ export class OrdersController {
   @Get(':publicToken')
   get(@Param('publicToken') publicToken: string, @Req() request: CustomerRequest) {
     return this.orders.getForCustomer(publicToken, request.user.customerId);
+  }
+
+  @Patch(':publicToken/checkout')
+  updatePendingCheckout(
+    @Param('publicToken') publicToken: string,
+    @Body() input: UpdatePendingOrderDto,
+    @Req() request: CustomerRequest,
+  ) {
+    return this.orders.updatePendingCheckout(publicToken, input, request.user.customerId);
   }
 
   @Post(':publicToken/cancel')

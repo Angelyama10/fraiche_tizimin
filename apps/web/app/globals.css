@@ -530,6 +530,52 @@ h3 {
   font-weight: 700;
 }
 
+.mobileCatalogNav {
+  margin-bottom: 24px;
+}
+
+.mobileCatalogNav > a,
+.mobileCatalogNav > details {
+  border-bottom: 1px solid var(--line);
+}
+
+.mobileCatalogNav > details summary {
+  display: flex;
+  min-height: 58px;
+  align-items: center;
+  justify-content: space-between;
+  font-family: var(--font-display), var(--font-display-fallback);
+  font-size: 26px;
+  font-weight: 600;
+  line-height: 1;
+  list-style: none;
+}
+
+.mobileCatalogNav > details summary::-webkit-details-marker {
+  display: none;
+}
+
+.mobileCatalogNav > details[open] summary svg {
+  transform: rotate(180deg);
+}
+
+.mobileCatalogNav > details > div {
+  display: grid;
+  padding: 2px 0 14px 14px;
+  border-left: 2px solid var(--mint-strong);
+  gap: 2px;
+}
+
+.mobileMenu .mobileCatalogNav details a {
+  min-height: 38px;
+  border: 0;
+  color: var(--ink-soft);
+  font-family: var(--font-body), var(--font-body-fallback);
+  font-size: 12px;
+  font-weight: 750;
+  line-height: 1.3;
+}
+
 .mobileNav {
   position: fixed;
   z-index: 65;
@@ -1872,6 +1918,90 @@ h3 {
   .desktopNav__menu a small {
     color: var(--ink-soft);
     font-size: 9px;
+  }
+
+  .desktopNav__menu--perfumes {
+    width: min(1120px, calc(100% - 44px));
+    max-height: calc(100svh - 92px);
+    overflow-y: auto;
+    grid-template-columns: minmax(0, 1fr) 270px;
+  }
+
+  .desktopNav__menu--perfumes > div:first-child {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .desktopNav__menu--perfumes > div > a {
+    min-height: 64px;
+    padding-inline: 8px;
+  }
+
+  .desktopNav__menu--inspirations {
+    width: min(900px, calc(100% - 60px));
+  }
+
+  .desktopNav__menu--catalog {
+    width: min(960px, calc(100% - 60px));
+    max-height: calc(100svh - 92px);
+    overflow-y: auto;
+    grid-template-columns: 1fr;
+  }
+
+  .desktopNav__menu--catalog > .desktopNav__catalogGroups {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    align-items: start;
+    gap: 20px 24px;
+  }
+
+  .desktopNav__catalogGroup {
+    display: grid;
+    align-content: start;
+    gap: 6px;
+  }
+
+  .desktopNav__catalogGroup > a {
+    min-height: 0 !important;
+    justify-content: start !important;
+    border: 0 !important;
+    padding: 0 !important;
+    color: var(--ink-soft);
+    font-size: 10px;
+    line-height: 1.35;
+  }
+
+  .desktopNav__catalogGroup > a:first-child {
+    margin-bottom: 3px;
+    color: var(--ink);
+  }
+
+  .desktopNav__catalogGroup > a:hover {
+    color: var(--emerald-bright);
+  }
+
+  .desktopNav__editorial {
+    display: flex;
+    min-height: 190px;
+    justify-content: flex-end;
+    padding: 22px;
+    border-left: 1px solid var(--line);
+    background: var(--emerald);
+    color: var(--white);
+    flex-direction: column;
+  }
+
+  .desktopNav__editorial > span,
+  .desktopNav__editorial > small {
+    color: rgba(255, 255, 255, 0.7) !important;
+    font-size: 9px;
+    font-weight: 800;
+    text-transform: uppercase;
+  }
+
+  .desktopNav__editorial > strong {
+    margin: 12px 0 20px;
+    color: var(--white);
+    font-size: 27px !important;
+    line-height: 1;
   }
 
   .desktopNav__feature {

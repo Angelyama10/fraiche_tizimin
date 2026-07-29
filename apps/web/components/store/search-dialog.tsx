@@ -76,7 +76,7 @@ export function SearchDialog({ open, onClose }: { open: boolean; onClose: () => 
               <input
                 aria-label="Buscar perfumes y cuidado personal"
                 onChange={(event) => setQuery(event.target.value)}
-                placeholder="Busca por aroma, marca o familia..."
+                placeholder="Busca por producto, marca o notas..."
                 ref={inputRef}
                 value={query}
               />

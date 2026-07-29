@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import { PaymentExperience } from '@/components/payments/payment-experience';
+import '../../pedidos/pedidos.css';
 import '../pago.css';
 
 export const metadata: Metadata = {
