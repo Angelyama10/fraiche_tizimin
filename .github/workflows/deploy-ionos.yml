@@ -32,6 +32,23 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Validar configuracion de despliegue
+        env:
+          IONOS_HOST: ${{ secrets.IONOS_HOST }}
+          IONOS_USER: ${{ secrets.IONOS_USER }}
+          IONOS_DEPLOY_PATH: ${{ secrets.IONOS_DEPLOY_PATH }}
+          SSH_PRIVATE_KEY: ${{ secrets.IONOS_SSH_PRIVATE_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.IONOS_KNOWN_HOSTS }}
+        run: |
+          missing=()
+          for key in IONOS_HOST IONOS_USER IONOS_DEPLOY_PATH SSH_PRIVATE_KEY SSH_KNOWN_HOSTS; do
+            if [[ -z "${!key}" ]]; then missing+=("$key"); fi
+          done
+          if (( ${#missing[@]} )); then
+            printf 'Faltan secretos de produccion: %s\n' "${missing[*]}" >&2
+            exit 1
+          fi
+
       - name: Preparar acceso SSH
         env:
           SSH_PRIVATE_KEY: ${{ secrets.IONOS_SSH_PRIVATE_KEY }}
@@ -47,6 +64,7 @@ jobs:
           IONOS_HOST: ${{ secrets.IONOS_HOST }}
           IONOS_USER: ${{ secrets.IONOS_USER }}
           IONOS_DEPLOY_PATH: ${{ secrets.IONOS_DEPLOY_PATH }}
+          IONOS_PORT: 22022
         run: |
           rsync -az --delete \
             --exclude '.git/' \
@@ -57,7 +75,7 @@ jobs:
             --exclude 'node_modules/' \
             --exclude '.next/' \
             --exclude 'dist/' \
-            -e 'ssh -i ~/.ssh/ionos' \
+            -e "ssh -p ${IONOS_PORT} -i ~/.ssh/ionos" \
             ./ "${IONOS_USER}@${IONOS_HOST}:${IONOS_DEPLOY_PATH}/"
 
       - name: Publicar aplicacion
@@ -65,6 +83,7 @@ jobs:
           IONOS_HOST: ${{ secrets.IONOS_HOST }}
           IONOS_USER: ${{ secrets.IONOS_USER }}
           IONOS_DEPLOY_PATH: ${{ secrets.IONOS_DEPLOY_PATH }}
+          IONOS_PORT: 22022
           RUN_SEED: ${{ github.event_name == 'push' && startsWith(github.ref_name, 'deploy-reset-') || inputs.seed }}
           RESET_STORE_DATA: ${{ github.event_name == 'push' && startsWith(github.ref_name, 'deploy-reset-') || inputs.reset_store_data }}
         run: |
@@ -72,5 +91,5 @@ jobs:
           reset_flag=''
           if [[ "$RUN_SEED" == 'true' ]]; then seed_flag='--seed'; fi
           if [[ "$RESET_STORE_DATA" == 'true' ]]; then reset_flag='--reset-store-data'; fi
-          ssh -i ~/.ssh/ionos "${IONOS_USER}@${IONOS_HOST}" \
+          ssh -p "${IONOS_PORT}" -i ~/.ssh/ionos "${IONOS_USER}@${IONOS_HOST}" \
             "cd '${IONOS_DEPLOY_PATH}' && chmod +x deploy/*.sh && ./deploy/deploy.sh ${seed_flag} ${reset_flag}"

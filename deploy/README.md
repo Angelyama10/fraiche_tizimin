@@ -151,7 +151,7 @@ Crea el entorno `production` en GitHub y agrega estos secretos:
 | `IONOS_USER` | `fraiche` |
 | `IONOS_DEPLOY_PATH` | `/opt/fraiche` |
 | `IONOS_SSH_PRIVATE_KEY` | Contenido de `~/.ssh/fraiche_ionos` |
-| `IONOS_KNOWN_HOSTS` | Resultado verificado de `ssh-keyscan -H IP_DEL_SERVIDOR` |
+| `IONOS_KNOWN_HOSTS` | Resultado verificado de `ssh-keyscan -p 22022 -H IP_DEL_SERVIDOR` |
 
 El archivo `deploy/production.env` se configura una sola vez dentro del VPS.
 Luego abre **Actions > Desplegar en IONOS > Run workflow**. Marca `seed` para
