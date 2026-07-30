@@ -280,11 +280,8 @@ services:
       - "3000"
     networks:
       - edge
-    read_only: true
     tmpfs:
       - /tmp:size=64m,mode=1777
-    volumes:
-      - next_cache:/app/.next/cache
     cap_drop:
       - ALL
     security_opt:
@@ -307,4 +304,3 @@ volumes:
   postgres_data:
   redis_data:
   minio_data:
-  next_cache:
