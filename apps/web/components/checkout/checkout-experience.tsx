@@ -12,29 +12,40 @@ import {
   LockKeyhole,
   MapPin,
   PackageCheck,
+  Plus,
   ShoppingBag,
   Store,
   Truck,
+  type LucideIcon,
 } from 'lucide-react';
 import Image from 'next/image';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { FormEvent, useEffect, useMemo, useState } from 'react';
-import { apiRequest, errorMessage } from '@/lib/api';
-import { formatMoney } from '@/lib/format';
-import type { CustomerAddress, Order } from '@/lib/types';
-import { useAuth } from '@/providers/auth-provider';
-import { useCart } from '@/providers/cart-provider';
-import { useNotify } from '@/providers/notification-provider';
+import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import {
   BankTransferDetails,
   type PaymentInstruction,
 } from '@/components/payments/bank-transfer-details';
 import { ProductMediaPlaceholder } from '@/components/store/product-media-placeholder';
+import { apiRequest, errorMessage } from '@/lib/api';
+import {
+  clearCheckoutDraft,
+  emptyCheckoutAddress,
+  loadCheckoutDraft,
+  saveCheckoutDraft,
+  type CheckoutAddressDraft,
+  type CheckoutDeliveryMethod,
+  type CheckoutDraft,
+  type CheckoutPaymentMethod,
+  type CheckoutPaymentProvider,
+  type CheckoutStep,
+} from '@/lib/checkout-draft';
+import { formatMoney } from '@/lib/format';
+import type { CustomerAddress, Order } from '@/lib/types';
+import { useAuth } from '@/providers/auth-provider';
+import { useCart } from '@/providers/cart-provider';
+import { useNotify } from '@/providers/notification-provider';
 
-type PaymentMethod = 'CARD' | 'PAYMENT_LINK' | 'BANK_TRANSFER' | 'CASH';
-type PaymentProvider = 'MERCADO_PAGO' | 'STRIPE';
-type DeliveryMethod = 'SHIPPING' | 'LOCAL_DELIVERY' | 'STORE_PICKUP';
 type GatewayConfiguration = {
   mercadoPago: {
     enabled: boolean;
@@ -45,24 +56,43 @@ type GatewayConfiguration = {
   stripe: { enabled: boolean; publishableKey: string | null };
 };
 
-const payments: Array<{ id: PaymentMethod; title: string; note: string; icon: typeof CreditCard }> = [
+const payments: Array<{
+  id: CheckoutPaymentMethod;
+  title: string;
+  note: string;
+  icon: LucideIcon;
+}> = [
   { id: 'CARD', title: 'Tarjeta en línea', note: 'Sin salir de KI’IBOK', icon: CreditCard },
   { id: 'PAYMENT_LINK', title: 'Link de pago', note: 'Abrir Mercado Pago', icon: Link2 },
   { id: 'BANK_TRANSFER', title: 'Transferencia', note: 'Sube tu comprobante', icon: Landmark },
   { id: 'CASH', title: 'Efectivo', note: 'Al recoger', icon: Banknote },
 ];
 
+const flowSteps: Array<{ id: CheckoutStep; label: string; shortLabel: string }> = [
+  { id: 'review', label: 'Revisa tu compra', shortLabel: 'Revisión' },
+  { id: 'delivery', label: 'Elige la entrega', shortLabel: 'Entrega' },
+  { id: 'payment', label: 'Define cómo pagar', shortLabel: 'Método' },
+];
+
 export function CheckoutExperience() {
   const router = useRouter();
   const auth = useAuth();
-  const { cart, loading: cartLoading, mutating, updateItem, removeItem, resetCart } = useCart();
+  const { cart, loading: cartLoading, mutating, updateItem, removeItem, resetCart } =
+    useCart();
   const notify = useNotify();
+  const initializedCart = useRef<string | null>(null);
+  const [step, setStep] = useState<CheckoutStep>('review');
+  const [draftReady, setDraftReady] = useState(false);
   const [addresses, setAddresses] = useState<CustomerAddress[]>([]);
   const [addressId, setAddressId] = useState('');
   const [newAddress, setNewAddress] = useState(false);
-  const [deliveryMethod, setDeliveryMethod] = useState<DeliveryMethod>('SHIPPING');
-  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>('CARD');
-  const [paymentProvider, setPaymentProvider] = useState<PaymentProvider>('MERCADO_PAGO');
+  const [address, setAddress] = useState<CheckoutAddressDraft>(emptyCheckoutAddress);
+  const [deliveryMethod, setDeliveryMethod] =
+    useState<CheckoutDeliveryMethod>('SHIPPING');
+  const [paymentMethod, setPaymentMethod] =
+    useState<CheckoutPaymentMethod>('CARD');
+  const [paymentProvider, setPaymentProvider] =
+    useState<CheckoutPaymentProvider>('MERCADO_PAGO');
   const [gatewayConfiguration, setGatewayConfiguration] =
     useState<GatewayConfiguration | null>(null);
   const [promotionCode, setPromotionCode] = useState('');
@@ -74,20 +104,40 @@ export function CheckoutExperience() {
 
   useEffect(() => {
     if (auth.status !== 'authenticated') return;
-    void auth.request<CustomerAddress[]>('/customers/me/addresses').then((items) => {
-      setAddresses(items);
-      const preferred = items.find((item) => item.isDefault) ?? items[0];
-      if (preferred) setAddressId(preferred.id);
-      else setNewAddress(true);
-    }).catch(() => undefined);
+    void auth
+      .request<CustomerAddress[]>('/customers/me/addresses')
+      .then((items) => {
+        setAddresses(items);
+        const preferred = items.find((item) => item.isDefault) ?? items[0];
+        if (preferred) {
+          setAddressId((current) => current || preferred.id);
+        } else {
+          setNewAddress(true);
+        }
+      })
+      .catch(() => undefined);
   }, [auth]);
+
+  useEffect(() => {
+    setAddress((current) => ({
+      ...current,
+      recipientName:
+        current.recipientName ||
+        [auth.customer?.firstName, auth.customer?.lastName].filter(Boolean).join(' '),
+      phone: current.phone || auth.customer?.phone || '',
+    }));
+  }, [auth.customer?.firstName, auth.customer?.lastName, auth.customer?.phone]);
 
   useEffect(() => {
     if (paymentMethod !== 'BANK_TRANSFER' && paymentMethod !== 'CASH') {
       setInstruction(null);
       return;
     }
-    void apiRequest<PaymentInstruction>(`/payments/instructions/${paymentMethod}`, { cache: 'no-store' }).then(setInstruction).catch(() => setInstruction(null));
+    void apiRequest<PaymentInstruction>(`/payments/instructions/${paymentMethod}`, {
+      cache: 'no-store',
+    })
+      .then(setInstruction)
+      .catch(() => setInstruction(null));
   }, [paymentMethod]);
 
   useEffect(() => {
@@ -107,6 +157,65 @@ export function CheckoutExperience() {
     if (paymentMethod === 'CASH') setDeliveryMethod('STORE_PICKUP');
   }, [paymentMethod]);
 
+  useEffect(() => {
+    const cartToken = cart?.publicToken;
+    if (!cartToken || initializedCart.current === cartToken) return;
+    initializedCart.current = cartToken;
+    setDraftReady(false);
+    const saved = loadCheckoutDraft(cartToken);
+    const requestedStep = readStepFromUrl();
+    if (saved) {
+      setDeliveryMethod(saved.deliveryMethod);
+      setPaymentMethod(saved.paymentMethod);
+      setPaymentProvider(saved.paymentProvider);
+      setAddressId(saved.addressId);
+      setNewAddress(saved.newAddress);
+      setAddress(saved.address);
+      setPromotionCode(saved.promotionCode);
+      setCustomerNotes(saved.customerNotes);
+      setStep(requestedStep ?? saved.step);
+    } else {
+      setStep(requestedStep ?? 'review');
+    }
+    setDraftReady(true);
+  }, [cart?.publicToken]);
+
+  useEffect(() => {
+    const cartToken = cart?.publicToken;
+    if (!cartToken || !draftReady) return;
+    saveCheckoutDraft(cartToken, {
+      step,
+      deliveryMethod,
+      paymentMethod,
+      paymentProvider,
+      addressId,
+      newAddress,
+      address,
+      promotionCode,
+      customerNotes,
+    });
+  }, [
+    address,
+    addressId,
+    cart?.publicToken,
+    customerNotes,
+    deliveryMethod,
+    draftReady,
+    newAddress,
+    paymentMethod,
+    paymentProvider,
+    promotionCode,
+    step,
+  ]);
+
+  useEffect(() => {
+    const handlePopState = () => {
+      setStep(readStepFromUrl() ?? 'review');
+    };
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, []);
+
   const gatewayAvailable =
     paymentMethod === 'CARD'
       ? paymentProvider === 'MERCADO_PAGO'
@@ -119,30 +228,100 @@ export function CheckoutExperience() {
     () => Boolean(cart?.items.length && auth.status === 'authenticated' && gatewayAvailable),
     [auth.status, cart?.items.length, gatewayAvailable],
   );
+  const activeStepIndex = flowSteps.findIndex((item) => item.id === step);
+
+  function currentDraft(nextStep: CheckoutStep = step): CheckoutDraft {
+    return {
+      step: nextStep,
+      deliveryMethod,
+      paymentMethod,
+      paymentProvider,
+      addressId,
+      newAddress,
+      address,
+      promotionCode,
+      customerNotes,
+    };
+  }
+
+  function goToStep(nextStep: CheckoutStep, replace = false) {
+    setStep(nextStep);
+    if (cart?.publicToken) {
+      saveCheckoutDraft(cart.publicToken, currentDraft(nextStep));
+    }
+    const url = new URL(window.location.href);
+    url.searchParams.set('step', nextStep);
+    url.searchParams.delete('restored');
+    const state = { ...window.history.state, checkoutStep: nextStep };
+    if (replace) window.history.replaceState(state, '', url);
+    else window.history.pushState(state, '', url);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+  function continueFromReview() {
+    if (auth.status !== 'authenticated') {
+      router.push(`/cuenta?redirect=${encodeURIComponent('/carrito?step=delivery')}`);
+      return;
+    }
+    goToStep('delivery');
+  }
+
+  function continueFromDelivery() {
+    const issue = deliveryIssue(deliveryMethod, newAddress, addressId, address);
+    if (issue) {
+      notify({ title: 'Completa la entrega', description: issue, tone: 'info' });
+      return;
+    }
+    goToStep('payment');
+  }
+
+  function goBack() {
+    if (step === 'payment') {
+      goToStep('delivery');
+      return;
+    }
+    if (step === 'delivery') {
+      goToStep('review');
+      return;
+    }
+    router.push('/productos');
+  }
+
+  function chooseDelivery(next: CheckoutDeliveryMethod) {
+    setDeliveryMethod(next);
+    if (next !== 'STORE_PICKUP' && paymentMethod === 'CASH') {
+      setPaymentMethod('CARD');
+    }
+  }
 
   async function placeOrder(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!cart || !canCheckout) return;
-    const form = new FormData(event.currentTarget);
-    if (deliveryMethod !== 'STORE_PICKUP' && !addressId && !newAddress) {
-      notify({ title: 'Selecciona una dirección', tone: 'info' });
+    const issue = deliveryIssue(deliveryMethod, newAddress, addressId, address);
+    if (issue) {
+      notify({ title: 'Revisa la entrega', description: issue, tone: 'info' });
+      goToStep('delivery');
       return;
     }
 
-    const shippingAddress = newAddress && deliveryMethod !== 'STORE_PICKUP' ? {
-      recipientName: String(form.get('recipientName') ?? ''),
-      phone: String(form.get('phone') ?? ''),
-      street: String(form.get('street') ?? ''),
-      exteriorNumber: String(form.get('exteriorNumber') ?? ''),
-      interiorNumber: String(form.get('interiorNumber') ?? '') || undefined,
-      neighborhood: String(form.get('neighborhood') ?? ''),
-      city: String(form.get('city') ?? ''),
-      municipality: String(form.get('municipality') ?? '') || undefined,
-      state: String(form.get('state') ?? ''),
-      postalCode: String(form.get('postalCode') ?? ''),
-      country: 'MX',
-      reference: String(form.get('reference') ?? '') || undefined,
-    } : undefined;
+    const shippingAddress =
+      newAddress && deliveryMethod !== 'STORE_PICKUP'
+        ? {
+            ...address,
+            recipientName: address.recipientName.trim(),
+            phone: address.phone.trim(),
+            street: address.street.trim(),
+            exteriorNumber: address.exteriorNumber.trim(),
+            interiorNumber: address.interiorNumber.trim() || undefined,
+            neighborhood: address.neighborhood.trim(),
+            city: address.city.trim(),
+            municipality: address.municipality.trim() || undefined,
+            state: address.state.trim(),
+            postalCode: address.postalCode.trim(),
+            country: 'MX',
+            reference: address.reference.trim() || undefined,
+          }
+        : undefined;
 
     setPlacing(true);
     setPaymentError(null);
@@ -155,12 +334,14 @@ export function CheckoutExperience() {
           paymentMethod,
           paymentProvider: paymentMethod === 'CARD' ? paymentProvider : undefined,
           deliveryMethod,
-          shippingAddressId: !newAddress && deliveryMethod !== 'STORE_PICKUP' ? addressId : undefined,
+          shippingAddressId:
+            !newAddress && deliveryMethod !== 'STORE_PICKUP' ? addressId : undefined,
           shippingAddress,
           promotionCode: promotionCode.trim() || undefined,
           customerNotes: customerNotes.trim() || undefined,
         }),
       });
+      clearCheckoutDraft(cart.publicToken);
       resetCart();
 
       if (paymentMethod === 'CARD') {
@@ -169,11 +350,14 @@ export function CheckoutExperience() {
       }
       if (paymentMethod === 'PAYMENT_LINK') {
         try {
-          const preference = await auth.request<{ checkoutUrl: string }>(`/payments/mercado-pago/orders/${order.publicToken}/preference`, { method: 'POST' });
+          const preference = await auth.request<{ checkoutUrl: string }>(
+            `/payments/mercado-pago/orders/${order.publicToken}/preference`,
+            { method: 'POST' },
+          );
           window.location.assign(preference.checkoutUrl);
           return;
-        } catch (error) {
-          setPaymentError(errorMessage(error));
+        } catch (preferenceError) {
+          setPaymentError(errorMessage(preferenceError));
         }
       }
       if (paymentMethod === 'BANK_TRANSFER') {
@@ -181,76 +365,300 @@ export function CheckoutExperience() {
         return;
       }
       setCompletedOrder(order);
-    } catch (error) {
-      notify({ title: 'No pudimos crear el pedido', description: errorMessage(error), tone: 'error' });
+    } catch (orderError) {
+      notify({
+        title: 'No pudimos crear el pedido',
+        description: errorMessage(orderError),
+        tone: 'error',
+      });
     } finally {
       setPlacing(false);
     }
   }
 
-  if (cartLoading || auth.status === 'loading') return <main className="checkoutLoading"><span className="buttonSpinner" /> Preparando tu carrito...</main>;
+  if (cartLoading || auth.status === 'loading') {
+    return (
+      <main className="checkoutLoading">
+        <span className="buttonSpinner" /> Preparando tu compra...
+      </main>
+    );
+  }
 
   if (completedOrder) {
-    return <CheckoutComplete order={completedOrder} paymentError={paymentError} instruction={instruction} />;
+    return (
+      <CheckoutComplete
+        instruction={instruction}
+        order={completedOrder}
+        paymentError={paymentError}
+      />
+    );
   }
 
   if (!cart?.items.length) {
-    return <main className="emptyCartPage pageWidth"><span><ShoppingBag aria-hidden="true" size={31} /></span><p className="eyebrow">Tu carrito</p><h1>Hay espacio para algo inolvidable.</h1><p>Explora el catálogo y elige la esencia que quieres llevar contigo.</p><Link className="button button--coral button--large" href="/productos">Descubrir perfumes <ArrowRight aria-hidden="true" size={18} /></Link></main>;
+    return (
+      <main className="emptyCartPage pageWidth">
+        <span><ShoppingBag aria-hidden="true" size={31} /></span>
+        <p className="eyebrow">Tu carrito</p>
+        <h1>Hay espacio para algo inolvidable.</h1>
+        <p>Explora el catálogo y elige la esencia que quieres llevar contigo.</p>
+        <Link className="button button--coral button--large" href="/productos">
+          Descubrir perfumes <ArrowRight aria-hidden="true" size={18} />
+        </Link>
+      </main>
+    );
   }
+
+  const stepCopy = flowSteps[activeStepIndex] ?? flowSteps[0];
 
   return (
     <main className="checkoutPage">
-      <div className="checkoutHeader pageWidth"><Link href="/productos"><ArrowLeft aria-hidden="true" size={16} /> Seguir explorando</Link><div><LockKeyhole aria-hidden="true" size={15} /> Compra protegida</div></div>
+      <div className="checkoutHeader pageWidth">
+        <button className="checkoutHeader__back" onClick={goBack} type="button">
+          <ArrowLeft aria-hidden="true" size={16} />
+          {step === 'review' ? 'Seguir comprando' : 'Regresar'}
+        </button>
+        <div><LockKeyhole aria-hidden="true" size={15} /> Compra protegida</div>
+      </div>
+
+      <nav aria-label="Progreso de compra" className="checkoutFlow pageWidth">
+        {flowSteps.map((item, index) => (
+          <button
+            aria-current={item.id === step ? 'step' : undefined}
+            className={item.id === step ? 'isActive' : index < activeStepIndex ? 'isDone' : ''}
+            disabled={index > activeStepIndex}
+            key={item.id}
+            onClick={() => goToStep(item.id)}
+            type="button"
+          >
+            <span>{index < activeStepIndex ? <Check size={14} /> : index + 1}</span>
+            <strong>{item.shortLabel}</strong>
+          </button>
+        ))}
+        <span className="checkoutFlow__payment"><LockKeyhole size={13} /> Pago</span>
+      </nav>
+
       <form className="checkoutLayout pageWidth" onSubmit={placeOrder}>
-        <div className="checkoutMain">
-          <div className="checkoutTitle"><span className="eyebrow">Finaliza tu compra</span><h1>Tu selección</h1></div>
-          <section className="checkoutItems">
-            {cart.items.map((item) => <article key={item.id}><div className="checkoutItems__image">{item.product.image?.url ? <Image alt={item.product.image.altText || item.product.name} fill sizes="90px" src={item.product.image.url} /> : <ProductMediaPlaceholder compact name={item.product.name} />}</div><div><strong>{item.product.name}</strong><small>{item.variant.name}</small><div className="quantityControl quantityControl--small"><button aria-label="Restar" disabled={mutating || item.quantity <= 1} onClick={() => updateItem(item.id, item.quantity - 1)} type="button">−</button><span>{item.quantity}</span><button aria-label="Sumar" disabled={mutating || item.quantity >= item.available} onClick={() => updateItem(item.id, item.quantity + 1)} type="button">+</button></div></div><div><strong>{formatMoney(item.lineTotalCents, item.currency)}</strong><button onClick={() => removeItem(item.id)} type="button">Quitar</button></div></article>)}
-          </section>
+        <div className="checkoutMain" key={step}>
+          <div className="checkoutTitle">
+            <span className="eyebrow">Paso {activeStepIndex + 1} de 3</span>
+            <h1>{stepCopy.label}</h1>
+          </div>
 
-          {auth.status !== 'authenticated' ? (
-            <section className="checkoutLogin"><div><LockKeyhole aria-hidden="true" size={22} /><div><h2>Entra para comprar de forma segura</h2><p>Tu cuenta protege la orden y te permite seguir la entrega.</p></div></div><Link className="button button--dark" href="/cuenta?redirect=/carrito">Entrar o registrarme <ArrowRight size={17} /></Link></section>
-          ) : (
+          {step === 'review' && (
             <>
-              <section className="checkoutSection">
-                <div className="checkoutSection__heading"><span>01</span><div><h2>¿Cómo quieres recibirlo?</h2><p>Selecciona la opción que mejor te funciona.</p></div></div>
-                <div className="choiceGrid choiceGrid--delivery">
-                  <Choice active={deliveryMethod === 'SHIPPING'} disabled={paymentMethod === 'CASH'} icon={Truck} label="Envío nacional" note="Con código de rastreo" onClick={() => setDeliveryMethod('SHIPPING')} />
-                  <Choice active={deliveryMethod === 'LOCAL_DELIVERY'} disabled={paymentMethod === 'CASH'} icon={MapPin} label="Entrega local" note="Tizimín y zona cercana" onClick={() => setDeliveryMethod('LOCAL_DELIVERY')} />
-                  <Choice active={deliveryMethod === 'STORE_PICKUP'} icon={Store} label="Recoger en tienda" note="Te avisamos al estar listo" onClick={() => setDeliveryMethod('STORE_PICKUP')} />
-                </div>
-                {deliveryMethod !== 'STORE_PICKUP' && (
-                  <div className="checkoutAddresses">
-                    {addresses.map((address) => <button className={!newAddress && addressId === address.id ? 'isActive' : ''} key={address.id} onClick={() => { setAddressId(address.id); setNewAddress(false); }} type="button"><MapPin size={16} /><span><strong>{address.label}</strong><small>{address.street} {address.exteriorNumber}, {address.city}</small></span>{!newAddress && addressId === address.id && <Check size={15} />}</button>)}
-                    <button className={newAddress ? 'isActive' : ''} onClick={() => { setNewAddress(true); setAddressId(''); }} type="button"><PlusIcon /><span><strong>Nueva dirección</strong><small>Usar solo en esta compra</small></span>{newAddress && <Check size={15} />}</button>
-                  </div>
-                )}
-                {deliveryMethod !== 'STORE_PICKUP' && newAddress && <InlineAddressFields customerName={[auth.customer?.firstName, auth.customer?.lastName].filter(Boolean).join(' ')} phone={auth.customer?.phone ?? ''} />}
+              <section className="checkoutItems">
+                {cart.items.map((item) => (
+                  <article key={item.id}>
+                    <div className="checkoutItems__image">
+                      {item.product.image?.url ? (
+                        <Image
+                          alt={item.product.image.altText || item.product.name}
+                          fill
+                          sizes="90px"
+                          src={item.product.image.url}
+                        />
+                      ) : (
+                        <ProductMediaPlaceholder compact name={item.product.name} />
+                      )}
+                    </div>
+                    <div>
+                      <strong>{item.product.name}</strong>
+                      <small>{item.variant.name}</small>
+                      <div className="quantityControl quantityControl--small">
+                        <button
+                          aria-label={`Restar ${item.product.name}`}
+                          disabled={mutating || item.quantity <= 1}
+                          onClick={() => updateItem(item.id, item.quantity - 1)}
+                          type="button"
+                        >
+                          −
+                        </button>
+                        <span>{item.quantity}</span>
+                        <button
+                          aria-label={`Sumar ${item.product.name}`}
+                          disabled={mutating || item.quantity >= item.available}
+                          onClick={() => updateItem(item.id, item.quantity + 1)}
+                          type="button"
+                        >
+                          +
+                        </button>
+                      </div>
+                    </div>
+                    <div>
+                      <strong>{formatMoney(item.lineTotalCents, item.currency)}</strong>
+                      <button onClick={() => removeItem(item.id)} type="button">Quitar</button>
+                    </div>
+                  </article>
+                ))}
               </section>
+              <Link className="checkoutAddMore" href="/productos">
+                <Plus size={16} /> Agregar más productos
+              </Link>
 
-              <section className="checkoutSection">
-                <div className="checkoutSection__heading"><span>02</span><div><h2>Elige cómo pagar</h2><p>Los datos de tarjeta nunca pasan por nuestros servidores.</p></div></div>
-                <div className="choiceGrid choiceGrid--payments">{payments.map((payment) => <Choice active={paymentMethod === payment.id} disabled={payment.id === 'PAYMENT_LINK' && (gatewayConfiguration ? !gatewayConfiguration.mercadoPago.linkEnabled : true)} icon={payment.icon} key={payment.id} label={payment.title} note={payment.id === 'PAYMENT_LINK' && gatewayConfiguration && !gatewayConfiguration.mercadoPago.linkEnabled ? 'Temporalmente no disponible' : payment.note} onClick={() => setPaymentMethod(payment.id)} />)}</div>
+              {auth.status !== 'authenticated' && (
+                <section className="checkoutLogin">
+                  <div>
+                    <LockKeyhole aria-hidden="true" size={22} />
+                    <div>
+                      <h2>Entra para continuar</h2>
+                      <p>Tu cuenta protege la orden y te permite seguir la entrega.</p>
+                    </div>
+                  </div>
+                  <Link
+                    className="button button--dark"
+                    href={`/cuenta?redirect=${encodeURIComponent('/carrito?step=delivery')}`}
+                  >
+                    Entrar o registrarme <ArrowRight size={17} />
+                  </Link>
+                </section>
+              )}
+            </>
+          )}
+
+          {step === 'delivery' && (
+            <section className="checkoutSection checkoutSection--flow">
+              <div className="checkoutSection__heading">
+                <span>02</span>
+                <div>
+                  <h2>¿Cómo quieres recibirlo?</h2>
+                  <p>Tu selección se conserva al avanzar o regresar.</p>
+                </div>
+              </div>
+              <div className="choiceGrid choiceGrid--delivery">
+                <Choice
+                  active={deliveryMethod === 'SHIPPING'}
+                  icon={Truck}
+                  label="Envío nacional"
+                  note="Con código de rastreo"
+                  onClick={() => chooseDelivery('SHIPPING')}
+                />
+                <Choice
+                  active={deliveryMethod === 'LOCAL_DELIVERY'}
+                  icon={MapPin}
+                  label="Entrega local"
+                  note="Tizimín y zona cercana"
+                  onClick={() => chooseDelivery('LOCAL_DELIVERY')}
+                />
+                <Choice
+                  active={deliveryMethod === 'STORE_PICKUP'}
+                  icon={Store}
+                  label="Recoger en tienda"
+                  note="Te avisamos al estar listo"
+                  onClick={() => chooseDelivery('STORE_PICKUP')}
+                />
+              </div>
+              {deliveryMethod !== 'STORE_PICKUP' && (
+                <div className="checkoutAddresses">
+                  {addresses.map((savedAddress) => (
+                    <button
+                      className={!newAddress && addressId === savedAddress.id ? 'isActive' : ''}
+                      key={savedAddress.id}
+                      onClick={() => {
+                        setAddressId(savedAddress.id);
+                        setNewAddress(false);
+                      }}
+                      type="button"
+                    >
+                      <MapPin size={16} />
+                      <span>
+                        <strong>{savedAddress.label}</strong>
+                        <small>
+                          {savedAddress.street} {savedAddress.exteriorNumber},{' '}
+                          {savedAddress.city}
+                        </small>
+                      </span>
+                      {!newAddress && addressId === savedAddress.id && <Check size={15} />}
+                    </button>
+                  ))}
+                  <button
+                    className={newAddress ? 'isActive' : ''}
+                    onClick={() => {
+                      setNewAddress(true);
+                      setAddressId('');
+                    }}
+                    type="button"
+                  >
+                    <span className="plusIcon">+</span>
+                    <span>
+                      <strong>Nueva dirección</strong>
+                      <small>Usar en esta compra</small>
+                    </span>
+                    {newAddress && <Check size={15} />}
+                  </button>
+                </div>
+              )}
+              {deliveryMethod !== 'STORE_PICKUP' && newAddress && (
+                <InlineAddressFields address={address} onChange={setAddress} />
+              )}
+            </section>
+          )}
+
+          {step === 'payment' && (
+            <>
+              <section className="checkoutSection checkoutSection--flow">
+                <div className="checkoutSection__heading">
+                  <span>03</span>
+                  <div>
+                    <h2>Elige cómo pagar</h2>
+                    <p>La tarjeta se captura únicamente en la pantalla segura siguiente.</p>
+                  </div>
+                </div>
+                <div className="choiceGrid choiceGrid--payments">
+                  {payments.map((payment) => (
+                    <Choice
+                      active={paymentMethod === payment.id}
+                      disabled={
+                        payment.id === 'PAYMENT_LINK' &&
+                        (gatewayConfiguration
+                          ? !gatewayConfiguration.mercadoPago.linkEnabled
+                          : true)
+                      }
+                      icon={payment.icon}
+                      key={payment.id}
+                      label={payment.title}
+                      note={
+                        payment.id === 'PAYMENT_LINK' &&
+                        gatewayConfiguration &&
+                        !gatewayConfiguration.mercadoPago.linkEnabled
+                          ? 'Temporalmente no disponible'
+                          : payment.note
+                      }
+                      onClick={() => setPaymentMethod(payment.id)}
+                    />
+                  ))}
+                </div>
                 {paymentMethod === 'CARD' && (
                   <div className="gatewayPicker" aria-label="Pasarela para tarjeta">
                     <button
                       className={paymentProvider === 'MERCADO_PAGO' ? 'isActive' : ''}
-                      disabled={gatewayConfiguration ? !gatewayConfiguration.mercadoPago.cardEnabled : true}
+                      disabled={
+                        gatewayConfiguration
+                          ? !gatewayConfiguration.mercadoPago.cardEnabled
+                          : true
+                      }
                       onClick={() => setPaymentProvider('MERCADO_PAGO')}
                       type="button"
                     >
                       <span className="gatewayPicker__mark gatewayPicker__mark--mp">MP</span>
-                      <span><strong>Mercado Pago</strong><small>Crédito, débito y meses disponibles</small></span>
+                      <span>
+                        <strong>Mercado Pago</strong>
+                        <small>Crédito, débito y meses disponibles</small>
+                      </span>
                       {paymentProvider === 'MERCADO_PAGO' && <Check size={15} />}
                     </button>
                     <button
                       className={paymentProvider === 'STRIPE' ? 'isActive' : ''}
-                      disabled={gatewayConfiguration ? !gatewayConfiguration.stripe.enabled : true}
+                      disabled={
+                        gatewayConfiguration ? !gatewayConfiguration.stripe.enabled : true
+                      }
                       onClick={() => setPaymentProvider('STRIPE')}
                       type="button"
                     >
                       <span className="gatewayPicker__mark gatewayPicker__mark--stripe">S</span>
-                      <span><strong>Stripe</strong><small>Tarjetas y autenticación bancaria</small></span>
+                      <span>
+                        <strong>Stripe</strong>
+                        <small>Tarjetas y autenticación bancaria</small>
+                      </span>
                       {paymentProvider === 'STRIPE' && <Check size={15} />}
                     </button>
                     {gatewayConfiguration &&
@@ -260,41 +668,278 @@ export function CheckoutExperience() {
                       )}
                   </div>
                 )}
-                {instruction && <div className="paymentInstruction"><Landmark aria-hidden="true" size={18} /><div><strong>{instruction.title}</strong>{paymentMethod === 'BANK_TRANSFER' ? <BankTransferDetails instruction={instruction} /> : <p>{instruction.instructions}</p>}</div></div>}
+                {instruction && (
+                  <div className="paymentInstruction">
+                    <Landmark aria-hidden="true" size={18} />
+                    <div>
+                      <strong>{instruction.title}</strong>
+                      {paymentMethod === 'BANK_TRANSFER' ? (
+                        <BankTransferDetails instruction={instruction} />
+                      ) : (
+                        <p>{instruction.instructions}</p>
+                      )}
+                    </div>
+                  </div>
+                )}
               </section>
 
               <section className="checkoutSection">
-                <div className="checkoutSection__heading"><span>03</span><div><h2>Últimos detalles</h2><p>Agrega un código o una nota para la tienda.</p></div></div>
-                <div className="checkoutExtras"><label className="formField"><span>Código de promoción</span><input onChange={(event) => setPromotionCode(event.target.value.toUpperCase())} placeholder="FRAICHE10" value={promotionCode} /></label><label className="formField"><span>Nota del pedido</span><textarea maxLength={500} onChange={(event) => setCustomerNotes(event.target.value)} placeholder="Indicaciones de entrega o mensaje especial." rows={3} value={customerNotes} /></label></div>
+                <div className="checkoutSection__heading">
+                  <span>+</span>
+                  <div>
+                    <h2>Detalles opcionales</h2>
+                    <p>Agrega un código o una nota para la tienda.</p>
+                  </div>
+                </div>
+                <div className="checkoutExtras">
+                  <label className="formField">
+                    <span>Código de promoción</span>
+                    <input
+                      onChange={(event) =>
+                        setPromotionCode(event.target.value.toUpperCase())
+                      }
+                      placeholder="FRAICHE10"
+                      value={promotionCode}
+                    />
+                  </label>
+                  <label className="formField">
+                    <span>Nota del pedido</span>
+                    <textarea
+                      maxLength={500}
+                      onChange={(event) => setCustomerNotes(event.target.value)}
+                      placeholder="Indicaciones de entrega o mensaje especial."
+                      rows={3}
+                      value={customerNotes}
+                    />
+                  </label>
+                </div>
               </section>
             </>
           )}
         </div>
 
         <aside className="orderSummary">
-          <span className="eyebrow">Resumen</span><h2>Tu pedido</h2>
-          <div className="orderSummary__lines"><span><small>Subtotal</small><strong>{formatMoney(cart.subtotalCents, cart.currency)}</strong></span><span><small>Envío</small><strong>Por confirmar</strong></span><span><small>Descuento</small><strong>Al aplicar código</strong></span></div>
-          <div className="orderSummary__total"><span>Total estimado</span><strong>{formatMoney(cart.subtotalCents, cart.currency)}</strong></div>
-          <button className="button button--coral button--large button--wide" disabled={!canCheckout || placing} type="submit">{placing ? <span className="buttonSpinner" /> : <>Confirmar pedido <ArrowRight aria-hidden="true" size={18} /></>}</button>
-          <p><LockKeyhole aria-hidden="true" size={13} /> Precio e inventario se validan al confirmar.</p>
-          <div className="orderSummary__trust"><span><PackageCheck size={17} /> Reserva automática de inventario</span><span><CreditCard size={17} /> Pago procesado por la pasarela</span></div>
+          <span className="eyebrow">Resumen en vivo</span>
+          <h2>
+            {cart.itemCount} {cart.itemCount === 1 ? 'producto' : 'productos'}
+          </h2>
+          <div className="orderSummary__lines">
+            <span>
+              <small>Subtotal</small>
+              <strong>{formatMoney(cart.subtotalCents, cart.currency)}</strong>
+            </span>
+            <span>
+              <small>Entrega</small>
+              <strong>{deliveryLabel(deliveryMethod)}</strong>
+            </span>
+            <span>
+              <small>Pago</small>
+              <strong>{paymentLabel(paymentMethod, paymentProvider)}</strong>
+            </span>
+          </div>
+          <div className="orderSummary__total">
+            <span>Total estimado</span>
+            <strong>{formatMoney(cart.subtotalCents, cart.currency)}</strong>
+          </div>
+
+          {step === 'review' && (
+            <button
+              className="button button--coral button--large button--wide"
+              onClick={continueFromReview}
+              type="button"
+            >
+              {auth.status === 'authenticated' ? 'Continuar a entrega' : 'Entrar para continuar'}
+              <ArrowRight aria-hidden="true" size={18} />
+            </button>
+          )}
+          {step === 'delivery' && (
+            <button
+              className="button button--coral button--large button--wide"
+              onClick={continueFromDelivery}
+              type="button"
+            >
+              Continuar a método de pago <ArrowRight aria-hidden="true" size={18} />
+            </button>
+          )}
+          {step === 'payment' && (
+            <button
+              className="button button--coral button--large button--wide"
+              disabled={!canCheckout || placing}
+              type="submit"
+            >
+              {placing ? (
+                <span className="buttonSpinner" />
+              ) : (
+                <>
+                  {paymentMethod === 'CARD' ? 'Ir al pago seguro' : 'Confirmar pedido'}
+                  <ArrowRight aria-hidden="true" size={18} />
+                </>
+              )}
+            </button>
+          )}
+          <p><LockKeyhole aria-hidden="true" size={13} /> Nada se cobra hasta el último paso.</p>
+          <div className="orderSummary__trust">
+            <span><PackageCheck size={17} /> Precio e inventario se validan al confirmar</span>
+            <span><CreditCard size={17} /> El pago ocurre en la pasarela protegida</span>
+          </div>
         </aside>
       </form>
     </main>
   );
 }
 
-function Choice({ active, disabled, icon: Icon, label, note, onClick }: { active: boolean; disabled?: boolean; icon: typeof Truck; label: string; note: string; onClick: () => void }) {
-  return <button className={active ? 'isActive' : ''} disabled={disabled} onClick={onClick} type="button"><Icon aria-hidden="true" size={20} /><span><strong>{label}</strong><small>{note}</small></span>{active && <Check aria-hidden="true" size={15} />}</button>;
+function Choice({
+  active,
+  disabled,
+  icon: Icon,
+  label,
+  note,
+  onClick,
+}: {
+  active: boolean;
+  disabled?: boolean;
+  icon: LucideIcon;
+  label: string;
+  note: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      className={active ? 'isActive' : ''}
+      disabled={disabled}
+      onClick={onClick}
+      type="button"
+    >
+      <Icon aria-hidden="true" size={20} />
+      <span><strong>{label}</strong><small>{note}</small></span>
+      {active && <Check aria-hidden="true" size={15} />}
+    </button>
+  );
 }
 
-function PlusIcon() { return <span className="plusIcon">+</span>; }
-
-function InlineAddressFields({ customerName, phone }: { customerName: string; phone: string }) {
-  return <div className="inlineAddress"><div className="formGrid"><label className="formField"><span>Recibe</span><input defaultValue={customerName} name="recipientName" required /></label><label className="formField"><span>WhatsApp</span><input defaultValue={phone} maxLength={30} name="phone" required /></label></div><div className="formGrid formGrid--street"><label className="formField"><span>Calle</span><input maxLength={160} name="street" required /></label><label className="formField"><span>Exterior</span><input maxLength={20} name="exteriorNumber" required /></label><label className="formField"><span>Interior</span><input maxLength={20} name="interiorNumber" /></label></div><label className="formField"><span>Colonia</span><input maxLength={100} name="neighborhood" required /></label><div className="formGrid"><label className="formField"><span>Ciudad</span><input defaultValue="Tizimín" maxLength={100} name="city" required /></label><label className="formField"><span>Municipio</span><input defaultValue="Tizimín" maxLength={100} name="municipality" /></label></div><div className="formGrid"><label className="formField"><span>Estado</span><input defaultValue="Yucatán" maxLength={100} name="state" required /></label><label className="formField"><span>Código postal</span><input inputMode="numeric" maxLength={10} name="postalCode" required /></label></div><label className="formField"><span>Referencia</span><input maxLength={300} name="reference" /></label></div>;
+function InlineAddressFields({
+  address,
+  onChange,
+}: {
+  address: CheckoutAddressDraft;
+  onChange: (address: CheckoutAddressDraft) => void;
+}) {
+  const update = (field: keyof CheckoutAddressDraft, value: string) => {
+    onChange({ ...address, [field]: value });
+  };
+  return (
+    <div className="inlineAddress">
+      <div className="formGrid">
+        <AddressField field="recipientName" label="Recibe" onChange={update} value={address.recipientName} />
+        <AddressField field="phone" label="WhatsApp" maxLength={30} onChange={update} value={address.phone} />
+      </div>
+      <div className="formGrid formGrid--street">
+        <AddressField field="street" label="Calle" maxLength={160} onChange={update} value={address.street} />
+        <AddressField field="exteriorNumber" label="Exterior" maxLength={20} onChange={update} value={address.exteriorNumber} />
+        <AddressField field="interiorNumber" label="Interior" maxLength={20} onChange={update} required={false} value={address.interiorNumber} />
+      </div>
+      <AddressField field="neighborhood" label="Colonia" maxLength={100} onChange={update} value={address.neighborhood} />
+      <div className="formGrid">
+        <AddressField field="city" label="Ciudad" maxLength={100} onChange={update} value={address.city} />
+        <AddressField field="municipality" label="Municipio" maxLength={100} onChange={update} required={false} value={address.municipality} />
+      </div>
+      <div className="formGrid">
+        <AddressField field="state" label="Estado" maxLength={100} onChange={update} value={address.state} />
+        <AddressField field="postalCode" inputMode="numeric" label="Código postal" maxLength={10} onChange={update} value={address.postalCode} />
+      </div>
+      <AddressField field="reference" label="Referencia" maxLength={300} onChange={update} required={false} value={address.reference} />
+    </div>
+  );
 }
 
-function CheckoutComplete({ order, paymentError, instruction }: { order: Order; paymentError: string | null; instruction: PaymentInstruction | null }) {
+function AddressField({
+  field,
+  inputMode,
+  label,
+  maxLength = 120,
+  onChange,
+  required = true,
+  value,
+}: {
+  field: keyof CheckoutAddressDraft;
+  inputMode?: 'numeric';
+  label: string;
+  maxLength?: number;
+  onChange: (field: keyof CheckoutAddressDraft, value: string) => void;
+  required?: boolean;
+  value: string;
+}) {
+  return (
+    <label className="formField">
+      <span>{label}</span>
+      <input
+        inputMode={inputMode}
+        maxLength={maxLength}
+        onChange={(event) => onChange(field, event.target.value)}
+        required={required}
+        value={value}
+      />
+    </label>
+  );
+}
+
+function deliveryIssue(
+  deliveryMethod: CheckoutDeliveryMethod,
+  newAddress: boolean,
+  addressId: string,
+  address: CheckoutAddressDraft,
+) {
+  if (deliveryMethod === 'STORE_PICKUP') return null;
+  if (!newAddress) {
+    return addressId ? null : 'Selecciona una dirección guardada o captura una nueva.';
+  }
+  const required: Array<[keyof CheckoutAddressDraft, string]> = [
+    ['recipientName', 'quién recibe'],
+    ['phone', 'WhatsApp'],
+    ['street', 'calle'],
+    ['exteriorNumber', 'número exterior'],
+    ['neighborhood', 'colonia'],
+    ['city', 'ciudad'],
+    ['state', 'estado'],
+    ['postalCode', 'código postal'],
+  ];
+  const missing = required.find(([field]) => !address[field].trim());
+  return missing ? `Completa el campo ${missing[1]}.` : null;
+}
+
+function readStepFromUrl(): CheckoutStep | null {
+  if (typeof window === 'undefined') return null;
+  const requested = new URLSearchParams(window.location.search).get('step');
+  return requested === 'review' || requested === 'delivery' || requested === 'payment'
+    ? requested
+    : null;
+}
+
+function deliveryLabel(method: CheckoutDeliveryMethod) {
+  if (method === 'STORE_PICKUP') return 'Recoger en tienda';
+  if (method === 'LOCAL_DELIVERY') return 'Entrega local';
+  return 'Envío nacional';
+}
+
+function paymentLabel(
+  method: CheckoutPaymentMethod,
+  provider: CheckoutPaymentProvider,
+) {
+  if (method === 'CARD') return provider === 'STRIPE' ? 'Tarjeta · Stripe' : 'Tarjeta · Mercado Pago';
+  if (method === 'PAYMENT_LINK') return 'Link de Mercado Pago';
+  if (method === 'BANK_TRANSFER') return 'Transferencia';
+  return 'Efectivo al recoger';
+}
+
+function CheckoutComplete({
+  order,
+  paymentError,
+  instruction,
+}: {
+  order: Order;
+  paymentError: string | null;
+  instruction: PaymentInstruction | null;
+}) {
   return (
     <main className="checkoutComplete pageWidth">
       <span className="checkoutComplete__icon">

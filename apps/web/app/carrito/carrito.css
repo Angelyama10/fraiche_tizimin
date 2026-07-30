@@ -15,16 +15,107 @@
 }
 
 .checkoutHeader a,
-.checkoutHeader div {
+.checkoutHeader div,
+.checkoutHeader__back {
   display: inline-flex;
   align-items: center;
   gap: 6px;
+}
+
+.checkoutHeader__back {
+  border: 0;
+  padding: 8px 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+}
+
+.checkoutFlow {
+  display: grid;
+  min-height: 72px;
+  align-items: center;
+  border-bottom: 1px solid var(--line);
+  grid-template-columns: repeat(3, minmax(0, 1fr)) auto;
+}
+
+.checkoutFlow > button {
+  position: relative;
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  border: 0;
+  padding: 15px 8px 15px 0;
+  background: transparent;
+  color: #9aa7a2;
+  text-align: left;
+  gap: 8px;
+}
+
+.checkoutFlow > button::after {
+  position: absolute;
+  right: 8px;
+  bottom: -1px;
+  left: 0;
+  height: 2px;
+  background: transparent;
+  content: '';
+}
+
+.checkoutFlow > button > span {
+  display: grid;
+  width: 24px;
+  height: 24px;
+  flex: 0 0 auto;
+  place-items: center;
+  border: 1px solid currentColor;
+  border-radius: 50%;
+  font-size: 8px;
+  font-weight: 900;
+}
+
+.checkoutFlow > button strong {
+  overflow: hidden;
+  font-size: 8px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.checkoutFlow > button.isDone,
+.checkoutFlow > button.isActive {
+  color: var(--emerald);
+}
+
+.checkoutFlow > button.isDone {
+  cursor: pointer;
+}
+
+.checkoutFlow > button.isActive::after {
+  background: var(--emerald);
+}
+
+.checkoutFlow > button:disabled {
+  cursor: default;
+  opacity: 1;
+}
+
+.checkoutFlow__payment {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  padding-left: 12px;
+  color: var(--ink-soft);
+  font-size: 8px;
+  gap: 5px;
 }
 
 .checkoutLayout {
   display: grid;
   padding-top: 38px;
   gap: 28px;
+}
+
+.checkoutMain {
+  min-width: 0;
 }
 
 .checkoutTitle h1 {
@@ -99,6 +190,18 @@
   font-size: 8px;
 }
 
+.checkoutAddMore {
+  display: inline-flex;
+  min-height: 42px;
+  align-items: center;
+  margin-top: 16px;
+  border-bottom: 1px solid currentColor;
+  color: var(--emerald);
+  font-size: 9px;
+  font-weight: 850;
+  gap: 7px;
+}
+
 .checkoutLogin {
   display: grid;
   margin-top: 28px;
@@ -129,6 +232,10 @@
   margin-top: 48px;
   border-top: 1px solid var(--line-dark);
   padding-top: 24px;
+}
+
+.checkoutSection--flow {
+  margin-top: 0;
 }
 
 .checkoutSection__heading {
@@ -574,6 +681,42 @@
   align-items: stretch;
   flex-direction: column;
   gap: 8px;
+}
+
+@media (max-width: 699px) {
+  .checkoutFlow {
+    min-height: 64px;
+    grid-template-columns: repeat(3, 1fr);
+  }
+
+  .checkoutFlow > button {
+    justify-content: center;
+    padding-right: 4px;
+  }
+
+  .checkoutFlow > button strong,
+  .checkoutFlow__payment {
+    display: none;
+  }
+
+  .checkoutFlow > button::after {
+    right: 4px;
+    left: 4px;
+  }
+
+  .checkoutItems article {
+    grid-template-columns: 68px minmax(0, 1fr) auto;
+  }
+
+  .checkoutItems__image {
+    width: 68px;
+    height: 82px;
+  }
+
+  .checkoutItems article > div:last-child {
+    align-self: stretch;
+    justify-content: space-between;
+  }
 }
 
 @media (min-width: 700px) {

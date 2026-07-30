@@ -856,11 +856,28 @@
   line-height: 0.95;
 }
 
+.lineTile--product h3 {
+  display: -webkit-box;
+  overflow: hidden;
+  font-size: clamp(27px, 3vw, 38px);
+  line-height: 1;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+
 .lineTile p {
   max-width: 290px;
   margin: 0;
   color: rgba(255, 255, 255, 0.8);
   font-size: 10px;
+}
+
+.lineTile--product p {
+  display: -webkit-box;
+  overflow: hidden;
+  line-height: 1.4;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
 }
 
 .lineTile b {

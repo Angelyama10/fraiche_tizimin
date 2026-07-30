@@ -12,7 +12,6 @@ import {
   MessageCircle,
   Package,
   PackageCheck,
-  Pencil,
   Store,
   Truck,
 } from 'lucide-react';
@@ -23,7 +22,6 @@ import {
   BankTransferDetails,
   type PaymentInstruction,
 } from '@/components/payments/bank-transfer-details';
-import { PendingOrderEditor } from '@/components/orders/pending-order-editor';
 import { apiRequest, errorMessage } from '@/lib/api';
 import { trackEvent } from '@/lib/analytics';
 import { formatDate, formatMoney } from '@/lib/format';
@@ -60,7 +58,6 @@ export function OrderTracking({ orderToken }: { orderToken: string }) {
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
   const [paying, setPaying] = useState(false);
-  const [editingCheckout, setEditingCheckout] = useState(false);
   const [instruction, setInstruction] = useState<PaymentInstruction | null>(null);
 
   const load = useCallback(async () => {
@@ -270,12 +267,6 @@ export function OrderTracking({ orderToken }: { orderToken: string }) {
   );
   const latestProof = transferPayment?.transferProofs?.[0];
   const isTerminalOrder = ['CANCELLED', 'EXPIRED'].includes(order.status);
-  const canEditCheckout =
-    order.status === 'PENDING_PAYMENT' &&
-    new Date(order.expiresAt).getTime() > Date.now() &&
-    !['APPROVED', 'IN_PROCESS', 'REFUNDED', 'CHARGED_BACK'].includes(
-      order.paymentStatus,
-    );
   const showTransferPanel =
     !isTerminalOrder &&
     order.paymentMethod === 'BANK_TRANSFER' &&
@@ -309,28 +300,6 @@ export function OrderTracking({ orderToken }: { orderToken: string }) {
       </header>
       <div className="orderLayout pageWidth">
         <div className="orderMain">
-          {editingCheckout && canEditCheckout && (
-            <PendingOrderEditor
-              onClose={() => setEditingCheckout(false)}
-              onUpdated={(updated) => {
-                setOrder(updated);
-                setInstruction(null);
-                if (
-                  updated.paymentMethod === 'BANK_TRANSFER' ||
-                  updated.paymentMethod === 'CASH'
-                ) {
-                  void apiRequest<PaymentInstruction>(
-                    `/payments/instructions/${updated.paymentMethod}`,
-                    { cache: 'no-store' },
-                  )
-                    .then(setInstruction)
-                    .catch(() => setInstruction(null));
-                }
-              }}
-              order={order}
-            />
-          )}
-
           {showTransferPanel && instruction && (
             <section className="transferPaymentPanel">
               <div className="transferPaymentPanel__heading">
@@ -517,16 +486,6 @@ export function OrderTracking({ orderToken }: { orderToken: string }) {
                   )}
                 </button>
               )}
-            {canEditCheckout && (
-              <button
-                className="editCheckoutButton"
-                onClick={() => setEditingCheckout(true)}
-                type="button"
-              >
-                <Pencil size={15} />
-                Cambiar entrega o forma de pago
-              </button>
-            )}
           </div>
           <div className="orderAddress">
             {isPickup ? <Store size={18} /> : <MapPin size={18} />}

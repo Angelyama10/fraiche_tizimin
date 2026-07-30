@@ -6,15 +6,17 @@ PROJECT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 ENV_FILE="${ENV_FILE:-${SCRIPT_DIR}/production.env}"
 COMPOSE_FILE="${PROJECT_DIR}/compose.production.yml"
 RUN_SEED=false
+RESET_STORE_DATA=false
 CHECK_ONLY=false
 
 usage() {
   cat <<'EOF'
-Uso: ./deploy/deploy.sh [--check] [--seed]
+Uso: ./deploy/deploy.sh [--check] [--seed] [--reset-store-data]
 
-  --check Valida secretos y Docker Compose sin iniciar servicios.
-  --seed  Carga los datos iniciales y crea/actualiza el administrador.
-          Usalo en el primer despliegue, no en cada actualizacion.
+  --check            Valida secretos y Docker Compose sin iniciar servicios.
+  --seed             Carga INVENTARIO 3.0 y crea/actualiza el administrador.
+  --reset-store-data Crea un respaldo y elimina los datos comerciales actuales
+                     antes del seed. Requiere --seed.
 EOF
 }
 
@@ -22,10 +24,16 @@ for argument in "$@"; do
   case "${argument}" in
     --check) CHECK_ONLY=true ;;
     --seed) RUN_SEED=true ;;
+    --reset-store-data) RESET_STORE_DATA=true ;;
     -h|--help) usage; exit 0 ;;
     *) echo "Opcion desconocida: ${argument}" >&2; usage; exit 1 ;;
   esac
 done
+
+if [[ "${RESET_STORE_DATA}" == "true" && "${RUN_SEED}" != "true" ]]; then
+  echo "--reset-store-data requiere --seed para no dejar la tienda sin catalogo." >&2
+  exit 1
+fi
 
 if [[ ! -f "${ENV_FILE}" ]]; then
   echo "Falta ${ENV_FILE}. Copia deploy/production.env.example y completa los valores." >&2
@@ -97,9 +105,15 @@ echo "Iniciando servicios de datos..."
 echo "Aplicando migraciones..."
 "${COMPOSE[@]}" run --rm migrate
 
+if [[ "${RESET_STORE_DATA}" == "true" ]]; then
+  echo "Respaldando y reemplazando los datos comerciales..."
+  "${SCRIPT_DIR}/reset-store-data.sh" --confirm-reset
+fi
+
 if [[ "${RUN_SEED}" == "true" ]]; then
-  echo "Cargando datos iniciales..."
+  echo "Cargando INVENTARIO 3.0..."
   "${COMPOSE[@]}" --profile tools run --rm seed
+  "${SCRIPT_DIR}/validate-inventory.sh"
 fi
 
 echo "Publicando API, frontend y HTTPS..."

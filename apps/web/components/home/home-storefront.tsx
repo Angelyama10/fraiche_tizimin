@@ -1,30 +1,26 @@
 import { ArrowDown, ArrowRight, MapPin, MessageCircle, ShieldCheck, Sparkles, Truck } from 'lucide-react';
 import Image from 'next/image';
 import Link from 'next/link';
-import { LINE_LABELS, lineFallbackImage } from '@/lib/catalog';
+import { LINE_LABELS, lineFallbackImage, productImage, productImageAlt } from '@/lib/catalog';
+import { formatMoney } from '@/lib/format';
 import type { SiteContentDocument, StorefrontSection } from '@/lib/site-content';
-import type { Product, ProductLine, Promotion } from '@/lib/types';
+import type { Product, Promotion } from '@/lib/types';
 import { ProductCard } from '@/components/store/product-card';
 import { Reveal } from '@/components/ui/reveal';
 import { SectionHeading } from '@/components/ui/section-heading';
 import { HeroSpotlight } from './hero-spotlight';
 import { ProductCarousel } from './product-carousel';
 
-const lineTiles: Array<{ line: ProductLine; kicker: string; description: string }> = [
-  { line: 'DESIGNER_CLASSIC', kicker: 'Ligera y versátil', description: 'Inspiraciones de diseñador para acompañarte todos los días.' },
-  { line: 'DESIGNER_37', kicker: 'Más intensidad', description: '37% de esencia para una estela profunda y duradera.' },
-  { line: 'NEECHE_PASSION', kicker: '$350 MXN', description: 'Aromas expresivos en presentación de 60 ml.' },
-  { line: 'PREMIUM', kicker: '$380 MXN', description: 'Inspiraciones nicho y árabes con 37% de esencia.' },
-];
-
 export function HomeStorefront({
   content,
   products,
   promotions,
+  showcaseProducts,
 }: {
   content: SiteContentDocument;
   products: Product[];
   promotions: Promotion[];
+  showcaseProducts: Product[];
 }) {
   const newProducts = products.filter((product) => product.isNew);
   const featured = products.filter((product) => product.isFeatured);
@@ -81,7 +77,12 @@ export function HomeStorefront({
             return (
               <section className="lineCollection section cmsSection" id={section.id} key={section.id}>
                 <SectionBackground section={section} />
-                <div className="pageWidth"><SectionHeading eyebrow={section.eyebrow} title={section.title} description={section.description || undefined} /><div className="lineCollection__grid">{lineTiles.map((tile, index) => <Reveal className={`lineTile lineTile--${index + 1}`} delay={index * 0.06} key={tile.line}><Link href={`/productos?line=${tile.line}`}><Image alt={LINE_LABELS[tile.line]} fill sizes="(max-width: 700px) 86vw, 25vw" src={lineFallbackImage(tile.line)} /><div className="lineTile__veil" /><span>{tile.kicker}</span><div><h3>{LINE_LABELS[tile.line]}</h3><p>{tile.description}</p></div><b aria-hidden="true"><ArrowRight size={18} /></b></Link></Reveal>)}</div></div>
+                <div className="pageWidth">
+                  <SectionHeading eyebrow={section.eyebrow} title={section.title} description={section.description || undefined} />
+                  {showcaseProducts.length
+                    ? <div className="lineCollection__grid">{showcaseProducts.map((product, index) => <CatalogShowcaseTile index={index} key={product.id} product={product} />)}</div>
+                    : <CatalogEmpty />}
+                </div>
               </section>
             );
           case 'BEST_SELLERS':
@@ -115,6 +116,38 @@ export function HomeStorefront({
         }
       })}
     </main>
+  );
+}
+
+function CatalogShowcaseTile({ product, index }: { product: Product; index: number }) {
+  const variant = product.variants.find((item) => item.inStock) ?? product.variants[0];
+  const image = productImage(product) ?? lineFallbackImage(product.line);
+  const detail = [
+    product.inspirationHouse?.name
+      ? `Inspirado en ${product.inspirationHouse.name}`
+      : product.brand?.name,
+    variant?.name,
+  ].filter(Boolean).join(' · ');
+
+  return (
+    <Reveal className={`lineTile lineTile--product lineTile--${index + 1}`} delay={index * 0.06}>
+      <Link href={`/productos/${product.slug}`}>
+        <Image
+          alt={productImageAlt(product)}
+          fill
+          sizes="(max-width: 700px) 86vw, 25vw"
+          src={image}
+          unoptimized={image.startsWith('http')}
+        />
+        <div className="lineTile__veil" />
+        <span>{LINE_LABELS[product.line]} · {formatMoney(variant?.priceCents, variant?.currency)}</span>
+        <div>
+          <h3>{product.name}</h3>
+          <p>{detail || product.shortDescription}</p>
+        </div>
+        <b aria-hidden="true"><ArrowRight size={18} /></b>
+      </Link>
+    </Reveal>
   );
 }
 

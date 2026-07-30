@@ -111,7 +111,8 @@ Cuando los cuatro registros DNS ya apunten al VPS:
 ./deploy/deploy.sh --seed
 ```
 
-`--seed` crea los datos iniciales y el usuario administrador. En despliegues posteriores ejecuta solo:
+`--seed` carga INVENTARIO 3.0 y crea o actualiza el usuario administrador. En
+despliegues posteriores ejecuta solo:
 
 ```bash
 ./deploy/deploy.sh
@@ -152,7 +153,20 @@ Crea el entorno `production` en GitHub y agrega estos secretos:
 | `IONOS_SSH_PRIVATE_KEY` | Contenido de `~/.ssh/fraiche_ionos` |
 | `IONOS_KNOWN_HOSTS` | Resultado verificado de `ssh-keyscan -H IP_DEL_SERVIDOR` |
 
-El archivo `deploy/production.env` se configura una sola vez dentro del VPS. Luego abre **Actions > Desplegar en IONOS > Run workflow**. Marca `seed` solamente en el primer despliegue.
+El archivo `deploy/production.env` se configura una sola vez dentro del VPS.
+Luego abre **Actions > Desplegar en IONOS > Run workflow**. Marca `seed` para
+cargar INVENTARIO 3.0. Si necesitas reemplazar todos los datos comerciales,
+marca también `reset_store_data`; el despliegue creará un respaldo antes de
+eliminar la información anterior.
+
+También puedes publicar una versión desde Git usando una etiqueta. Las etiquetas
+`deploy-*` hacen un despliegue normal y las etiquetas `deploy-reset-*` crean un
+respaldo, reemplazan los datos comerciales y cargan INVENTARIO 3.0:
+
+```bash
+git tag deploy-reset-inventory-3
+git push origin deploy-reset-inventory-3
+```
 
 ## Operacion util
 
@@ -170,13 +184,19 @@ docker compose --env-file deploy/production.env -f compose.production.yml logs -
 ## Limpiar los datos de prueba
 
 Antes de cargar el catalogo real, este comando crea un respaldo y elimina
-productos, inventario, clientes, pedidos, pagos, promociones y solicitudes de
-prueba. Conserva el administrador, el contenido visual, las reglas de precio,
-las ubicaciones y las instrucciones de pago:
+productos, inventario, clientes, pedidos, pagos, promociones, marcas, categorias,
+lineas y solicitudes de prueba. Conserva el administrador, el contenido visual,
+las reglas de precio, las ubicaciones y las instrucciones de pago:
 
 ```bash
 ./deploy/reset-store-data.sh --confirm-reset
 ```
 
-No ejecutes `deploy.sh --seed` despues de esta limpieza porque volveria a crear
-el catalogo de demostracion. Agrega el catalogo real desde `/admin`.
+Para reemplazar y cargar el catalogo corregido en una sola operación usa:
+
+```bash
+./deploy/deploy.sh --seed --reset-store-data
+```
+
+El respaldo generado se conserva en `deploy/backups/` y puede restaurarse con
+`deploy/restore-postgres.sh`.

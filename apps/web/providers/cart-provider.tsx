@@ -25,6 +25,7 @@ type CartContextValue = {
   updateItem: (itemId: string, quantity: number) => Promise<void>;
   removeItem: (itemId: string) => Promise<void>;
   refreshCart: () => Promise<void>;
+  adoptCartToken: (cartToken: string) => Promise<Cart>;
   resetCart: () => void;
 };
 
@@ -178,6 +179,24 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
     storeCart(await apiRequest<Cart>(`/carts/${activeCart.publicToken}`, { cache: 'no-store' }));
   }, [ensureCart, storeCart]);
 
+  const adoptCartToken = useCallback(
+    async (cartToken: string) => {
+      setMutating(true);
+      try {
+        const restored = await apiRequest<Cart>(`/carts/${cartToken}`, {
+          cache: 'no-store',
+        });
+        if (restored.status !== 'ACTIVE') {
+          throw new Error('El carrito recuperado ya no está activo.');
+        }
+        return storeCart(restored);
+      } finally {
+        setMutating(false);
+      }
+    },
+    [storeCart],
+  );
+
   const resetCart = useCallback(() => {
     localStorage.removeItem(CART_KEY);
     cartRef.current = null;
@@ -196,9 +215,21 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
       updateItem,
       removeItem,
       refreshCart,
+      adoptCartToken,
       resetCart,
     }),
-    [cart, loading, mutating, drawerOpen, addItem, updateItem, removeItem, refreshCart, resetCart],
+    [
+      cart,
+      loading,
+      mutating,
+      drawerOpen,
+      addItem,
+      updateItem,
+      removeItem,
+      refreshCart,
+      adoptCartToken,
+      resetCart,
+    ],
   );
 
   return <CartContext.Provider value={value}>{children}</CartContext.Provider>;

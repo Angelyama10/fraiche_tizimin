@@ -40,6 +40,14 @@ export class OrdersController {
     return this.orders.updatePendingCheckout(publicToken, input, request.user.customerId);
   }
 
+  @Post(':publicToken/reopen-checkout')
+  reopenCheckout(
+    @Param('publicToken') publicToken: string,
+    @Req() request: CustomerRequest,
+  ) {
+    return this.orders.reopenCheckout(publicToken, request.user.customerId);
+  }
+
   @Post(':publicToken/cancel')
   cancel(@Param('publicToken') publicToken: string, @Req() request: CustomerRequest) {
     return this.orders.cancel(publicToken, request.user.customerId);

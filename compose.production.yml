@@ -170,6 +170,7 @@ services:
       DATABASE_URL: postgresql://${POSTGRES_USER:?Define POSTGRES_USER}:${POSTGRES_PASSWORD:?Define POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:?Define POSTGRES_DB}?schema=public
       ADMIN_EMAIL: ${ADMIN_EMAIL:?Define ADMIN_EMAIL}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:?Define ADMIN_PASSWORD}
+      SEED_INVENTORY: ${SEED_INVENTORY:-true}
     depends_on:
       migrate:
         condition: service_completed_successfully

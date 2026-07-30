@@ -9,8 +9,9 @@ CONFIRMATION="${1:-}"
 if [[ "${CONFIRMATION}" != "--confirm-reset" ]]; then
   cat >&2 <<'EOF'
 Este comando elimina productos, inventario, clientes, pedidos, pagos,
-promociones y registros de prueba. Conserva el administrador, el contenido
-visual del sitio, las reglas de precio y las instrucciones de pago.
+promociones, marcas, categorias, lineas de catalogo y registros de prueba.
+Conserva el administrador, el contenido visual del sitio, las reglas de precio,
+las ubicaciones y las instrucciones de pago.
 
 Uso: ./deploy/reset-store-data.sh --confirm-reset
 EOF
@@ -35,4 +36,4 @@ echo "Limpiando datos comerciales de prueba..."
 echo "Reiniciando API y Redis..."
 "${COMPOSE[@]}" restart api redis
 
-echo "Datos comerciales eliminados. El administrador y la configuracion permanecen."
+echo "Datos comerciales y catalogo anterior eliminados. El administrador y la configuracion permanecen."

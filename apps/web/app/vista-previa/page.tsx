@@ -23,6 +23,7 @@ export default async function StorefrontPreviewPage({ searchParams }: { searchPa
           content={preview.content}
           products={data.products}
           promotions={data.promotions}
+          showcaseProducts={data.showcaseProducts}
         />
       </StorefrontPreviewFrame>
     );

@@ -66,5 +66,4 @@ jobs:
       - run: cp deploy/production.env.example deploy/production.env
       - run: sed -i 's/CHANGE_ME[^ ]*/ci-placeholder/g' deploy/production.env
       - run: docker compose --env-file deploy/production.env -f compose.production.yml config --quiet
-      - run: docker compose --env-file deploy/production.env -f compose.production.yml build api web migrate
-
+      - run: docker compose --env-file deploy/production.env -f compose.production.yml build api web migrate seed

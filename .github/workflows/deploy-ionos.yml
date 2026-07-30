@@ -4,10 +4,18 @@ on:
   workflow_dispatch:
     inputs:
       seed:
-        description: Cargar datos iniciales (solo primer despliegue)
+        description: Cargar INVENTARIO 3.0
         required: true
         default: false
         type: boolean
+      reset_store_data:
+        description: Respaldar y reemplazar la base comercial antes del seed
+        required: true
+        default: false
+        type: boolean
+  push:
+    tags:
+      - "deploy-*"
 
 permissions:
   contents: read
@@ -57,10 +65,12 @@ jobs:
           IONOS_HOST: ${{ secrets.IONOS_HOST }}
           IONOS_USER: ${{ secrets.IONOS_USER }}
           IONOS_DEPLOY_PATH: ${{ secrets.IONOS_DEPLOY_PATH }}
-          RUN_SEED: ${{ inputs.seed }}
+          RUN_SEED: ${{ github.event_name == 'push' && startsWith(github.ref_name, 'deploy-reset-') || inputs.seed }}
+          RESET_STORE_DATA: ${{ github.event_name == 'push' && startsWith(github.ref_name, 'deploy-reset-') || inputs.reset_store_data }}
         run: |
           seed_flag=''
+          reset_flag=''
           if [[ "$RUN_SEED" == 'true' ]]; then seed_flag='--seed'; fi
+          if [[ "$RESET_STORE_DATA" == 'true' ]]; then reset_flag='--reset-store-data'; fi
           ssh -i ~/.ssh/ionos "${IONOS_USER}@${IONOS_HOST}" \
-            "cd '${IONOS_DEPLOY_PATH}' && chmod +x deploy/*.sh && ./deploy/deploy.sh ${seed_flag}"
-
+            "cd '${IONOS_DEPLOY_PATH}' && chmod +x deploy/*.sh && ./deploy/deploy.sh ${seed_flag} ${reset_flag}"

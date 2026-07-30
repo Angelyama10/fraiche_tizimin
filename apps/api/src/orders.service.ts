@@ -44,6 +44,8 @@ const orderInclude = {
   },
 } satisfies Prisma.OrderInclude;
 
+const CHECKOUT_REOPENED_MARKER = '[CHECKOUT_REOPENED]';
+
 @Injectable()
 export class OrdersService {
   constructor(
@@ -291,15 +293,22 @@ export class OrdersService {
   }
 
   async listForCustomer(customerId: string, query: ListCustomerOrdersDto) {
+    const where = {
+      customerId,
+      NOT: {
+        status: OrderStatus.CANCELLED,
+        internalNotes: { contains: CHECKOUT_REOPENED_MARKER },
+      },
+    } satisfies Prisma.OrderWhereInput;
     const [orders, total] = await this.prisma.$transaction([
       this.prisma.order.findMany({
-        where: { customerId },
+        where,
         include: orderInclude,
         orderBy: { createdAt: 'desc' },
         skip: (query.page - 1) * query.pageSize,
         take: query.pageSize,
       }),
-      this.prisma.order.count({ where: { customerId } }),
+      this.prisma.order.count({ where }),
     ]);
     return {
       data: orders.map((order) => this.serializeOrder(order)),
@@ -310,6 +319,159 @@ export class OrdersService {
         pageCount: Math.ceil(total / query.pageSize),
       },
     };
+  }
+
+  async reopenCheckout(publicToken: string, customerId: string) {
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      try {
+        return await this.prisma.$transaction(
+          async (transaction) => {
+            const order = await transaction.order.findFirst({
+              where: { publicToken, customerId },
+              include: {
+                items: {
+                  include: { reservation: true },
+                  orderBy: { createdAt: 'asc' },
+                },
+                payments: { orderBy: { createdAt: 'desc' } },
+                promotions: { include: { promotion: true } },
+              },
+            });
+            if (!order) throw new NotFoundException('Orden no encontrada.');
+
+            const deduplicationKey = `order-checkout-reopened:${order.id}`;
+            const previous = await transaction.outboxEvent.findUnique({
+              where: { deduplicationKey },
+            });
+            if (previous) {
+              const payload = previous.payload as {
+                cartToken?: string;
+                draft?: Record<string, unknown>;
+              };
+              if (payload.cartToken && payload.draft) {
+                return { cartToken: payload.cartToken, draft: payload.draft };
+              }
+            }
+
+            if (order.status !== OrderStatus.PENDING_PAYMENT) {
+              throw new ConflictException(
+                'Solo puedes regresar al flujo desde un pedido pendiente de pago.',
+              );
+            }
+            const immutablePaymentStatuses = new Set<PaymentStatus>([
+              PaymentStatus.APPROVED,
+              PaymentStatus.IN_PROCESS,
+              PaymentStatus.REFUNDED,
+              PaymentStatus.CHARGED_BACK,
+            ]);
+            if (immutablePaymentStatuses.has(order.paymentStatus)) {
+              throw new ConflictException(
+                'El pago ya se está procesando o fue confirmado; la compra ya no puede reabrirse.',
+              );
+            }
+
+            const activeReservations = order.items.flatMap((item) =>
+              item.reservation?.status === ReservationStatus.ACTIVE
+                ? [item.reservation]
+                : [],
+            );
+            if (
+              activeReservations.length !== order.items.length ||
+              activeReservations.some((reservation) => reservation.expiresAt <= new Date())
+            ) {
+              throw new ConflictException(
+                'La reserva venció. Vuelve al catálogo para crear una compra nueva.',
+              );
+            }
+
+            const expiresAt = new Date();
+            expiresAt.setDate(expiresAt.getDate() + 30);
+            const cart = await transaction.cart.create({
+              data: {
+                customerId,
+                currency: order.currency,
+                expiresAt,
+                items: {
+                  create: order.items.map((item) => ({
+                    variantId: item.variantId,
+                    quantity: item.quantity,
+                  })),
+                },
+              },
+            });
+            const inactivePaymentStatuses = new Set<PaymentStatus>([
+              PaymentStatus.CANCELLED,
+              PaymentStatus.REFUNDED,
+              PaymentStatus.CHARGED_BACK,
+            ]);
+            const currentPayment = order.payments.find(
+              (payment) => !inactivePaymentStatuses.has(payment.status),
+            );
+            const promotionCode =
+              order.promotions.find((entry) => entry.promotion.code)?.promotion.code ?? '';
+            const draft = {
+              step: 'payment',
+              deliveryMethod: order.deliveryMethod,
+              paymentMethod: order.paymentMethod,
+              paymentProvider:
+                currentPayment?.provider === PaymentProvider.STRIPE
+                  ? PaymentProvider.STRIPE
+                  : PaymentProvider.MERCADO_PAGO,
+              addressId: '',
+              newAddress:
+                order.deliveryMethod !== DeliveryMethod.STORE_PICKUP &&
+                Boolean(order.shippingAddress),
+              address:
+                order.deliveryMethod === DeliveryMethod.STORE_PICKUP
+                  ? null
+                  : order.shippingAddress,
+              promotionCode,
+              customerNotes: order.customerNotes ?? '',
+            };
+
+            await this.cancelOrderInTransaction(transaction, order);
+            await transaction.order.update({
+              where: { id: order.id },
+              data: {
+                internalNotes: order.internalNotes
+                  ? `${order.internalNotes}\n${CHECKOUT_REOPENED_MARKER}`
+                  : CHECKOUT_REOPENED_MARKER,
+              },
+            });
+            await transaction.outboxEvent.create({
+              data: {
+                type: 'ORDER_CHECKOUT_REOPENED',
+                aggregateType: 'Order',
+                aggregateId: order.id,
+                deduplicationKey,
+                payload: {
+                  orderId: order.id,
+                  publicToken: order.publicToken,
+                  cartToken: cart.publicToken,
+                  draft,
+                },
+              },
+            });
+            return { cartToken: cart.publicToken, draft };
+          },
+          {
+            isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+            maxWait: 5000,
+            timeout: 15000,
+          },
+        );
+      } catch (error) {
+        if (
+          error instanceof Prisma.PrismaClientKnownRequestError &&
+          error.code === 'P2034' &&
+          attempt < 3
+        ) {
+          continue;
+        }
+        throw error;
+      }
+    }
+    throw new ConflictException('No fue posible reabrir la compra. Intenta nuevamente.');
   }
 
   async cancel(publicToken: string, customerId: string) {
@@ -329,79 +491,93 @@ export class OrdersService {
           where: { publicToken, ...(customerId ? { customerId } : {}) },
         });
         if (!order) throw new NotFoundException('Orden no encontrada.');
-        if (order.paymentStatus === PaymentStatus.APPROVED) {
-          throw new ConflictException('Una orden pagada requiere un proceso de reembolso.');
-        }
-        if (order.status === OrderStatus.CANCELLED || order.status === OrderStatus.EXPIRED) return;
-
-        const reservations = await transaction.inventoryReservation.findMany({
-          where: { orderItem: { orderId: order.id }, status: ReservationStatus.ACTIVE },
-        });
-
-        for (const reservation of reservations) {
-          const released = await transaction.inventoryLevel.updateMany({
-            where: {
-              id: reservation.inventoryLevelId,
-              reserved: { gte: reservation.quantity },
-            },
-            data: {
-              available: { increment: reservation.quantity },
-              reserved: { decrement: reservation.quantity },
-              version: { increment: 1 },
-            },
-          });
-          if (!released.count) {
-            throw new ConflictException('No fue posible liberar el inventario reservado.');
-          }
-          await transaction.inventoryReservation.update({
-            where: { id: reservation.id },
-            data: { status: ReservationStatus.RELEASED, releasedAt: new Date() },
-          });
-          await transaction.stockMovement.create({
-            data: {
-              variantId: reservation.variantId,
-              locationId: reservation.locationId,
-              type: StockMovementType.RELEASE,
-              quantity: reservation.quantity,
-              referenceId: order.id,
-              reason: 'Cancelacion de orden',
-            },
-          });
-        }
-
-        await transaction.payment.updateMany({
-          where: { orderId: order.id, status: { in: [PaymentStatus.PENDING, PaymentStatus.IN_PROCESS] } },
-          data: { status: PaymentStatus.CANCELLED },
-        });
-        const appliedPromotions = await transaction.orderPromotion.findMany({
-          where: { orderId: order.id, releasedAt: null },
-        });
-        for (const applied of appliedPromotions) {
-          await transaction.promotion.updateMany({
-            where: { id: applied.promotionId, uses: { gt: 0 } },
-            data: { uses: { decrement: 1 } },
-          });
-          await transaction.orderPromotion.update({
-            where: {
-              orderId_promotionId: {
-                orderId: order.id,
-                promotionId: applied.promotionId,
-              },
-            },
-            data: { releasedAt: new Date() },
-          });
-        }
-        await transaction.order.update({
-          where: { id: order.id },
-          data: {
-            status: OrderStatus.CANCELLED,
-            paymentStatus: PaymentStatus.CANCELLED,
-            cancelledAt: new Date(),
-          },
-        });
+        await this.cancelOrderInTransaction(transaction, order);
       },
       { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
     );
+  }
+
+  private async cancelOrderInTransaction(
+    transaction: Prisma.TransactionClient,
+    order: {
+      id: string;
+      status: OrderStatus;
+      paymentStatus: PaymentStatus;
+    },
+  ) {
+    if (order.paymentStatus === PaymentStatus.APPROVED) {
+      throw new ConflictException('Una orden pagada requiere un proceso de reembolso.');
+    }
+    if (order.status === OrderStatus.CANCELLED || order.status === OrderStatus.EXPIRED) return;
+
+    const reservations = await transaction.inventoryReservation.findMany({
+      where: { orderItem: { orderId: order.id }, status: ReservationStatus.ACTIVE },
+    });
+
+    for (const reservation of reservations) {
+      const released = await transaction.inventoryLevel.updateMany({
+        where: {
+          id: reservation.inventoryLevelId,
+          reserved: { gte: reservation.quantity },
+        },
+        data: {
+          available: { increment: reservation.quantity },
+          reserved: { decrement: reservation.quantity },
+          version: { increment: 1 },
+        },
+      });
+      if (!released.count) {
+        throw new ConflictException('No fue posible liberar el inventario reservado.');
+      }
+      await transaction.inventoryReservation.update({
+        where: { id: reservation.id },
+        data: { status: ReservationStatus.RELEASED, releasedAt: new Date() },
+      });
+      await transaction.stockMovement.create({
+        data: {
+          variantId: reservation.variantId,
+          locationId: reservation.locationId,
+          type: StockMovementType.RELEASE,
+          quantity: reservation.quantity,
+          referenceId: order.id,
+          reason: 'Cancelacion de orden',
+        },
+      });
+    }
+
+    await transaction.payment.updateMany({
+      where: {
+        orderId: order.id,
+        status: { in: [PaymentStatus.PENDING, PaymentStatus.IN_PROCESS] },
+      },
+      data: { status: PaymentStatus.CANCELLED },
+    });
+    const appliedPromotions = await transaction.orderPromotion.findMany({
+      where: { orderId: order.id, releasedAt: null },
+    });
+    for (const applied of appliedPromotions) {
+      await transaction.promotion.updateMany({
+        where: { id: applied.promotionId, uses: { gt: 0 } },
+        data: { uses: { decrement: 1 } },
+      });
+      await transaction.orderPromotion.update({
+        where: {
+          orderId_promotionId: {
+            orderId: order.id,
+            promotionId: applied.promotionId,
+          },
+        },
+        data: { releasedAt: new Date() },
+      });
+    }
+    await transaction.order.update({
+      where: { id: order.id },
+      data: {
+        status: OrderStatus.CANCELLED,
+        paymentStatus: PaymentStatus.CANCELLED,
+        cancelledAt: new Date(),
+      },
+    });
   }
 
   private async createInTransaction(

@@ -15,20 +15,25 @@ import {
   CreditCard,
   LockKeyhole,
   Package,
-  Pencil,
   ShieldCheck,
   Sparkles,
 } from 'lucide-react';
-import { AnimatePresence, motion } from 'motion/react';
 import Image from 'next/image';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { FormEvent, useEffect, useMemo, useState } from 'react';
-import { PendingOrderEditor } from '@/components/orders/pending-order-editor';
 import { apiRequest, errorMessage } from '@/lib/api';
+import {
+  normalizeCheckoutAddress,
+  saveCheckoutDraft,
+  type CheckoutDeliveryMethod,
+  type CheckoutPaymentMethod,
+  type CheckoutPaymentProvider,
+} from '@/lib/checkout-draft';
 import { formatMoney } from '@/lib/format';
 import type { Order } from '@/lib/types';
 import { useAuth } from '@/providers/auth-provider';
+import { useCart } from '@/providers/cart-provider';
 import { useNotify } from '@/providers/notification-provider';
 
 type GatewayConfiguration = {
@@ -46,6 +51,18 @@ type PaymentResult = {
   statusDetail?: string | null;
 };
 
+type ReopenCheckoutResult = {
+  cartToken: string;
+  draft: {
+    deliveryMethod: CheckoutDeliveryMethod;
+    paymentMethod: CheckoutPaymentMethod;
+    paymentProvider: CheckoutPaymentProvider;
+    address?: Record<string, string | null> | null;
+    promotionCode?: string;
+    customerNotes?: string;
+  };
+};
+
 export function PaymentExperience({
   orderToken,
   returningFromStripe = false,
@@ -55,11 +72,12 @@ export function PaymentExperience({
 }) {
   const auth = useAuth();
   const router = useRouter();
+  const { adoptCartToken } = useCart();
   const notify = useNotify();
   const [order, setOrder] = useState<Order | null>(null);
   const [configuration, setConfiguration] = useState<GatewayConfiguration | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [editingCheckout, setEditingCheckout] = useState(false);
+  const [reopeningCheckout, setReopeningCheckout] = useState(false);
 
   useEffect(() => {
     if (auth.status !== 'authenticated') return;
@@ -174,43 +192,67 @@ export function PaymentExperience({
         ? configuration.stripe.enabled
         : false;
 
-  async function continueAfterCheckoutUpdate(updated: Order) {
-    setOrder(updated);
-    setEditingCheckout(false);
-
-    if (updated.paymentMethod === 'CARD') return;
-    if (updated.paymentMethod === 'PAYMENT_LINK') {
-      try {
-        const preference = await auth.request<{ checkoutUrl: string }>(
-          `/payments/mercado-pago/orders/${updated.publicToken}/preference`,
-          { method: 'POST' },
-        );
-        window.location.assign(preference.checkoutUrl);
-        return;
-      } catch (preferenceError) {
-        notify({
-          title: 'El pedido cambió, pero no pudimos abrir Mercado Pago',
-          description: errorMessage(preferenceError),
-          tone: 'error',
-        });
-      }
+  async function reopenCheckout() {
+    if (!canEditCheckout || reopeningCheckout) return;
+    setReopeningCheckout(true);
+    try {
+      const restored = await auth.request<ReopenCheckoutResult>(
+        `/orders/${orderToken}/reopen-checkout`,
+        { method: 'POST' },
+      );
+      await adoptCartToken(restored.cartToken);
+      saveCheckoutDraft(restored.cartToken, {
+        step: 'payment',
+        deliveryMethod: restored.draft.deliveryMethod,
+        paymentMethod: restored.draft.paymentMethod,
+        paymentProvider: restored.draft.paymentProvider,
+        addressId: '',
+        newAddress: restored.draft.deliveryMethod !== 'STORE_PICKUP',
+        address: normalizeCheckoutAddress(restored.draft.address),
+        promotionCode: restored.draft.promotionCode ?? '',
+        customerNotes: restored.draft.customerNotes ?? '',
+      });
+      router.push('/carrito?step=payment&restored=1');
+    } catch (reopenError) {
+      notify({
+        title: 'No pudimos regresar a la compra',
+        description: errorMessage(reopenError),
+        tone: 'error',
+      });
+      setReopeningCheckout(false);
     }
-    router.push(`/pedidos/${updated.publicToken}`);
   }
 
   return (
     <main className="paymentPage">
       <div className="paymentTopbar pageWidth">
-        <Link href={`/pedidos/${orderToken}`}><ArrowLeft size={16} /> Volver al pedido</Link>
+        {canEditCheckout ? (
+          <button
+            className="paymentTopbar__back"
+            disabled={reopeningCheckout}
+            onClick={() => {
+              void reopenCheckout();
+            }}
+            type="button"
+          >
+            {reopeningCheckout ? <span className="buttonSpinner" /> : <ArrowLeft size={16} />}
+            {reopeningCheckout ? 'Recuperando compra...' : 'Volver a revisar'}
+          </button>
+        ) : (
+          <Link href={`/pedidos/${orderToken}`}>
+            <ArrowLeft size={16} /> Volver al pedido
+          </Link>
+        )}
         <div>
-          {canEditCheckout && (
-            <button onClick={() => setEditingCheckout(true)} type="button">
-              <Pencil size={14} /> Cambiar entrega o pago
-            </button>
-          )}
           <span><LockKeyhole size={14} /> Sesión cifrada</span>
         </div>
       </div>
+      <nav aria-label="Progreso de compra" className="paymentFlowProgress pageWidth">
+        <span>1. Revisión</span>
+        <span>2. Entrega</span>
+        <span>3. Método</span>
+        <strong aria-current="step">4. Pago seguro</strong>
+      </nav>
       <div className="paymentLayout pageWidth">
         <section className="paymentPanel">
           <div className="paymentPanel__intro">
@@ -223,17 +265,6 @@ export function PaymentExperience({
             <span><LockKeyhole size={18} /><strong>Datos tokenizados</strong></span>
             <span><Sparkles size={18} /><strong>Confirmación inmediata</strong></span>
           </div>
-          {canEditCheckout && (
-            <div className="paymentChangeBar">
-              <div>
-                <strong>¿Necesitas corregir algo?</strong>
-                <p>Cambia dirección, entrega o forma de pago sin perder tu pedido.</p>
-              </div>
-              <button onClick={() => setEditingCheckout(true)} type="button">
-                <Pencil size={15} /> Modificar
-              </button>
-            </div>
-          )}
           {!providerAvailable ? (
             <div className="paymentUnavailable">
               <CreditCard size={22} />
@@ -260,41 +291,6 @@ export function PaymentExperience({
         </section>
         <OrderPaymentSummary order={order} provider={currentProvider ?? 'Pasarela'} />
       </div>
-      <AnimatePresence>
-        {editingCheckout && canEditCheckout && (
-          <motion.div
-            animate={{ opacity: 1 }}
-            aria-label="Cambiar entrega o forma de pago"
-            aria-modal="true"
-            className="paymentEditorDialog"
-            exit={{ opacity: 0 }}
-            initial={{ opacity: 0 }}
-            role="dialog"
-          >
-            <button
-              aria-label="Cerrar edición"
-              className="paymentEditorDialog__backdrop"
-              onClick={() => setEditingCheckout(false)}
-              type="button"
-            />
-            <motion.div
-              animate={{ opacity: 1, y: 0 }}
-              className="paymentEditorDialog__content"
-              exit={{ opacity: 0, y: 18 }}
-              initial={{ opacity: 0, y: 18 }}
-              transition={{ type: 'spring', damping: 28, stiffness: 300 }}
-            >
-              <PendingOrderEditor
-                onClose={() => setEditingCheckout(false)}
-                onUpdated={(updated) => {
-                  void continueAfterCheckoutUpdate(updated);
-                }}
-                order={order}
-              />
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
     </main>
   );
 }

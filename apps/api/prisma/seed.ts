@@ -22,6 +22,7 @@ const pool = new Pool({
   max: Number(process.env.DB_POOL_MAX ?? 10),
 });
 const prisma = new PrismaClient({ adapter: new PrismaPg(pool) });
+const INVENTORY_3_PRODUCT_COUNT = 1027;
 
 type InventoryCatalogEntry = {
   slug: string;
@@ -30,7 +31,9 @@ type InventoryCatalogEntry = {
   description: string;
   line: ProductLine;
   brandSlug: string;
+  brandName: string;
   categorySlugs: string[];
+  catalogLineSlugs: string[];
   sku: string;
   variantName: string;
   concentrationLabel?: string;
@@ -38,6 +41,8 @@ type InventoryCatalogEntry = {
   volumeMl?: number;
   catalogPriceCents?: number;
   stock: number;
+  inspirationHouseSlug?: string;
+  inspirationHouseName?: string;
   attributes: Record<string, unknown>;
   variantAttributes: Record<string, unknown>;
 };
@@ -120,6 +125,8 @@ const catalogLineSeeds: CatalogLineSeed[] = [
   { sectionSlug: 'colecciones', slug: 'coleccion-10ml', name: 'Colección 10 ml', description: 'Colecciones por casa perfumera en 10 ml.', sortOrder: 10 },
   { sectionSlug: 'colecciones', slug: 'coleccion-30ml', name: 'Colección 30 ml', description: 'Colecciones por casa perfumera en 30 ml.', sortOrder: 20 },
   { sectionSlug: 'colecciones', slug: 'coleccion-60ml', name: 'Colección 60 ml', description: 'Colecciones por casa perfumera en 60 ml.', sortOrder: 30 },
+  { sectionSlug: 'colecciones', slug: 'coleccion-100ml', name: 'Colección 100 ml', description: 'Colecciones por casa perfumera en 100 ml.', sortOrder: 40 },
+  { sectionSlug: 'cuidado-belleza', slug: 'cuidado-facial', name: 'Cuidado Facial', description: 'Productos para la limpieza, hidratación y cuidado del rostro.', sortOrder: 100 },
   { sectionSlug: 'infantil', slug: 'infantil', name: 'Infantil', description: 'Selección infantil.', audience: CatalogAudience.KIDS, sortOrder: 10 },
   { sectionSlug: 'velas', slug: 'velas', name: 'Velas', description: 'Velas aromáticas.', sortOrder: 10 },
   { sectionSlug: 'extractos', slug: 'extractos', name: 'Extractos', description: 'Extractos aromáticos.', sortOrder: 10 },
@@ -352,12 +359,74 @@ const categorySeeds: CategorySeed[] = [
 ];
 
 function loadInventoryCatalog() {
-  const path = resolve(__dirname, 'data/inventory-2.0.json');
-  const parsed = JSON.parse(readFileSync(path, 'utf8')) as InventoryCatalogEntry[];
-  if (!Array.isArray(parsed) || parsed.length !== 872) {
-    throw new Error('El catálogo normalizado debe contener exactamente 872 productos.');
+  const path = resolve(__dirname, 'data/inventory-3.0.json');
+  const parsed = JSON.parse(readFileSync(path, 'utf8')) as unknown;
+  if (!Array.isArray(parsed) || parsed.length !== INVENTORY_3_PRODUCT_COUNT) {
+    throw new Error(
+      `El catálogo normalizado INVENTARIO 3.0 debe contener exactamente ${INVENTORY_3_PRODUCT_COUNT} productos.`,
+    );
   }
-  return parsed;
+  const catalog = parsed as InventoryCatalogEntry[];
+  const productLines = new Set<string>(Object.values(ProductLine));
+  const skus = new Set<string>();
+  const slugs = new Set<string>();
+
+  for (const [index, entry] of catalog.entries()) {
+    const row = index + 1;
+    for (const [field, value] of [
+      ['slug', entry.slug],
+      ['name', entry.name],
+      ['shortDescription', entry.shortDescription],
+      ['description', entry.description],
+      ['brandSlug', entry.brandSlug],
+      ['brandName', entry.brandName],
+      ['sku', entry.sku],
+      ['variantName', entry.variantName],
+    ] as const) {
+      if (typeof value !== 'string' || value.trim() === '') {
+        throw new Error(`INVENTARIO 3.0: ${field} es obligatorio en el registro ${row}.`);
+      }
+    }
+    if (!productLines.has(entry.line)) {
+      throw new Error(`INVENTARIO 3.0: ProductLine inválido para SKU ${entry.sku}.`);
+    }
+    if (!Array.isArray(entry.categorySlugs) || entry.categorySlugs.length === 0) {
+      throw new Error(`INVENTARIO 3.0: falta categoría para SKU ${entry.sku}.`);
+    }
+    if (!Array.isArray(entry.catalogLineSlugs) || entry.catalogLineSlugs.length === 0) {
+      throw new Error(`INVENTARIO 3.0: falta línea de catálogo para SKU ${entry.sku}.`);
+    }
+    if (
+      Boolean(entry.inspirationHouseSlug)
+      !== Boolean(entry.inspirationHouseName)
+    ) {
+      throw new Error(
+        `INVENTARIO 3.0: la casa perfumera está incompleta para SKU ${entry.sku}.`,
+      );
+    }
+    if (!Number.isInteger(entry.stock) || entry.stock < 0) {
+      throw new Error(`INVENTARIO 3.0: existencia inválida para SKU ${entry.sku}.`);
+    }
+    if (
+      entry.concentrationPercent !== undefined
+      && (entry.concentrationPercent < 0 || entry.concentrationPercent > 1)
+    ) {
+      throw new Error(`INVENTARIO 3.0: concentración inválida para SKU ${entry.sku}.`);
+    }
+    if (entry.sku !== entry.sku.trim() || /\s/.test(entry.sku)) {
+      throw new Error(`INVENTARIO 3.0: el SKU ${entry.sku} contiene espacios.`);
+    }
+    if (skus.has(entry.sku)) {
+      throw new Error(`INVENTARIO 3.0: SKU duplicado ${entry.sku}.`);
+    }
+    if (slugs.has(entry.slug)) {
+      throw new Error(`INVENTARIO 3.0: slug duplicado ${entry.slug}.`);
+    }
+    skus.add(entry.sku);
+    slugs.add(entry.slug);
+  }
+
+  return catalog;
 }
 
 function normalizeDisplayName(value: string) {
@@ -393,7 +462,7 @@ function toSlug(value: string) {
     .replace(/^-+|-+$/g, '');
 }
 
-async function seedCatalogNavigation() {
+async function seedCatalogNavigation(catalog: InventoryCatalogEntry[]) {
   const sectionIds = new Map<string, string>();
   const lineIds = new Map<string, string>();
 
@@ -450,12 +519,26 @@ async function seedCatalogNavigation() {
     lineIds.set(catalogLine.slug, catalogLine.id);
   }
 
-  for (const [sortOrder, name] of perfumeHouseSeeds.entries()) {
+  const houseNames = new Map(
+    perfumeHouseSeeds.map((name) => [toSlug(name), name]),
+  );
+  for (const entry of catalog) {
+    if (entry.inspirationHouseSlug && entry.inspirationHouseName) {
+      houseNames.set(entry.inspirationHouseSlug, entry.inspirationHouseName);
+    }
+  }
+
+  const perfumeHouseIds = new Map<string, string>();
+  const orderedHouses = [...houseNames.entries()].sort((left, right) =>
+    left[1].localeCompare(right[1], 'es-MX'),
+  );
+  for (const [sortOrder, [slug, name]] of orderedHouses.entries()) {
     const perfumeHouse = await prisma.perfumeHouse.upsert({
-      where: { slug: toSlug(name) },
+      where: { slug },
       update: { name, sortOrder, isActive: true },
-      create: { slug: toSlug(name), name, sortOrder, isActive: true },
+      create: { slug, name, sortOrder, isActive: true },
     });
+    perfumeHouseIds.set(perfumeHouse.slug, perfumeHouse.id);
 
     for (const [houseLineOrder, lineSlug] of (initialHouseLines[name] ?? []).entries()) {
       const catalogLineId = lineIds.get(lineSlug);
@@ -476,6 +559,38 @@ async function seedCatalogNavigation() {
       });
     }
   }
+
+  const catalogLineHouses = new Map<
+    string,
+    { catalogLineId: string; perfumeHouseId: string; sortOrder: number }
+  >();
+  for (const entry of catalog) {
+    if (!entry.inspirationHouseSlug) continue;
+    const perfumeHouseId = perfumeHouseIds.get(entry.inspirationHouseSlug);
+    if (!perfumeHouseId) {
+      throw new Error(`No existe la casa perfumera ${entry.inspirationHouseSlug}.`);
+    }
+    for (const lineSlug of entry.catalogLineSlugs) {
+      const catalogLineId = lineIds.get(lineSlug);
+      if (!catalogLineId) throw new Error(`No existe la línea ${lineSlug}.`);
+      const key = `${catalogLineId}:${perfumeHouseId}`;
+      if (!catalogLineHouses.has(key)) {
+        catalogLineHouses.set(key, {
+          catalogLineId,
+          perfumeHouseId,
+          sortOrder: catalogLineHouses.size,
+        });
+      }
+    }
+  }
+  if (catalogLineHouses.size > 0) {
+    await prisma.catalogLineHouse.createMany({
+      data: [...catalogLineHouses.values()],
+      skipDuplicates: true,
+    });
+  }
+
+  return { catalogLineIds: lineIds, perfumeHouseIds };
 }
 
 async function seedCategories() {
@@ -531,9 +646,17 @@ async function seedCatalogProduct(
   locationId: string,
   brandIds: Map<string, string>,
   categoryIds: Map<string, string>,
+  catalogLineIds: Map<string, string>,
+  perfumeHouseIds: Map<string, string>,
 ) {
   const brandId = brandIds.get(entry.brandSlug);
   if (!brandId) throw new Error(`No existe la marca ${entry.brandSlug}.`);
+  const inspirationHouseId = entry.inspirationHouseSlug
+    ? perfumeHouseIds.get(entry.inspirationHouseSlug)
+    : undefined;
+  if (entry.inspirationHouseSlug && !inspirationHouseId) {
+    throw new Error(`No existe la casa perfumera ${entry.inspirationHouseSlug}.`);
+  }
   const productName = normalizeDisplayName(entry.name);
   const variantName = normalizeVariantName(entry.variantName);
   const shortDescription = normalizeProductCopy(entry.shortDescription);
@@ -547,6 +670,7 @@ async function seedCatalogProduct(
       description,
       line: entry.line,
       brandId,
+      inspirationHouseId: inspirationHouseId ?? null,
       status: ProductStatus.ACTIVE,
       attributes: entry.attributes as Prisma.InputJsonValue,
     },
@@ -557,6 +681,7 @@ async function seedCatalogProduct(
       description,
       line: entry.line,
       brandId,
+      inspirationHouseId,
       status: ProductStatus.ACTIVE,
       attributes: entry.attributes as Prisma.InputJsonValue,
     },
@@ -567,10 +692,17 @@ async function seedCatalogProduct(
     if (!categoryId) throw new Error(`No existe la categoría ${slug}.`);
     return { productId: product.id, categoryId };
   });
-  await prisma.productCategory.createMany({
-    data: productCategories,
-    skipDuplicates: true,
+  const productCatalogLines = entry.catalogLineSlugs.map((slug) => {
+    const catalogLineId = catalogLineIds.get(slug);
+    if (!catalogLineId) throw new Error(`No existe la línea de catálogo ${slug}.`);
+    return { productId: product.id, catalogLineId };
   });
+  await prisma.$transaction([
+    prisma.productCategory.deleteMany({ where: { productId: product.id } }),
+    prisma.productCategory.createMany({ data: productCategories }),
+    prisma.productCatalogLine.deleteMany({ where: { productId: product.id } }),
+    prisma.productCatalogLine.createMany({ data: productCatalogLines }),
+  ]);
 
   const variant = await prisma.productVariant.upsert({
     where: { sku: entry.sku },
@@ -623,7 +755,7 @@ async function seedCatalogProduct(
                 type: StockMovementType.PURCHASE,
                 quantity: entry.stock,
                 referenceId: product.id,
-                reason: 'Importación inicial de INVENTARIO 2.0.xlsx',
+                reason: 'Importación inicial de INVENTARIO 3 CORREGIDO.xlsx',
               },
             }),
           ]
@@ -680,16 +812,31 @@ async function main() {
     });
   }
 
-  await seedCatalogNavigation();
+  const seedInventory = ['1', 'true', 'yes'].includes(
+    (
+      process.env.SEED_INVENTORY
+      ?? process.env.SEED_LEGACY_INVENTORY
+      ?? ''
+    ).trim().toLowerCase(),
+  );
+  const catalog = seedInventory ? loadInventoryCatalog() : [];
+  const { catalogLineIds, perfumeHouseIds } =
+    await seedCatalogNavigation(catalog);
 
   const brandIds = new Map<string, string>();
-  for (const [slug, name] of [
+  const brandNames = new Map<string, string>([
     ['fraiche', 'Fraiche'],
     ['neeche', 'Neeche Passion'],
     ['premium', 'Premium'],
     ['victorias-secret', "Victoria's Secret"],
     ['arabic-care', 'Cuidado árabe'],
-  ]) {
+  ]);
+  for (const entry of catalog) {
+    if (!brandNames.has(entry.brandSlug)) {
+      brandNames.set(entry.brandSlug, entry.brandName);
+    }
+  }
+  for (const [slug, name] of brandNames) {
     const brand = await prisma.brand.upsert({
       where: { slug },
       update: { name },
@@ -746,18 +893,21 @@ async function main() {
     data: { status: ProductStatus.ARCHIVED },
   });
 
-  const seedLegacyInventory = ['1', 'true', 'yes'].includes(
-    process.env.SEED_LEGACY_INVENTORY?.trim().toLowerCase() ?? '',
-  );
-  if (seedLegacyInventory) {
-    const catalog = loadInventoryCatalog();
+  if (seedInventory) {
     const batchSize = 16;
     for (let index = 0; index < catalog.length; index += batchSize) {
       await Promise.all(
         catalog
           .slice(index, index + batchSize)
           .map((entry) =>
-            seedCatalogProduct(entry, location.id, brandIds, categoryIds),
+            seedCatalogProduct(
+              entry,
+              location.id,
+              brandIds,
+              categoryIds,
+              catalogLineIds,
+              perfumeHouseIds,
+            ),
           ),
       );
     }

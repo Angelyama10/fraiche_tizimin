@@ -9,3 +9,4 @@ postgres_data/
 redis_data/
 deploy/production.env
 deploy/backups/
+outputs/**/*.inspect.ndjson

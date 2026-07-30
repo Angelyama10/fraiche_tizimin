@@ -6,6 +6,6 @@ import './page.css';
 export const revalidate = 60;
 
 export default async function HomePage() {
-  const [{ products, promotions }, content] = await Promise.all([getStorefrontData(), getPublishedSiteContent()]);
-  return <HomeStorefront content={content} products={products} promotions={promotions} />;
+  const [{ products, promotions, showcaseProducts }, content] = await Promise.all([getStorefrontData(), getPublishedSiteContent()]);
+  return <HomeStorefront content={content} products={products} promotions={promotions} showcaseProducts={showcaseProducts} />;
 }
