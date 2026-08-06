@@ -17,6 +17,7 @@ import {
   PaymentStatus,
   Prisma,
   ReservationStatus,
+  ShippingQuoteStatus,
   StockMovementType,
   TransferProofStatus,
 } from '@prisma/client';
@@ -111,6 +112,7 @@ export class PaymentsService {
       },
     });
     if (!order) throw new NotFoundException('Orden no encontrada.');
+    this.assertShippingQuoteReady(order);
     if (order.paymentMethod !== PaymentMethod.PAYMENT_LINK) {
       throw new BadRequestException('La orden no usa link de Mercado Pago.');
     }
@@ -466,6 +468,7 @@ export class PaymentsService {
     if (!order || order.paymentMethod !== PaymentMethod.BANK_TRANSFER) {
       throw new NotFoundException('Orden de transferencia no encontrada.');
     }
+    this.assertShippingQuoteReady(order);
     if (!input.objectKey.startsWith(`transfer-proofs/${order.id}/`)) {
       throw new BadRequestException('El comprobante no pertenece a esta orden.');
     }
@@ -1210,6 +1213,7 @@ export class PaymentsService {
       },
     });
     if (!order) throw new NotFoundException('Orden no encontrada.');
+    this.assertShippingQuoteReady(order);
     if (order.paymentMethod !== PaymentMethod.CARD) {
       throw new BadRequestException('La orden no utiliza pago con tarjeta.');
     }
@@ -1224,6 +1228,14 @@ export class PaymentsService {
     }
     this.cardPayment(order, provider);
     return order;
+  }
+
+  private assertShippingQuoteReady(order: { shippingQuoteStatus: ShippingQuoteStatus }) {
+    if (order.shippingQuoteStatus === ShippingQuoteStatus.PENDING) {
+      throw new ConflictException(
+        'Estamos calculando el envio. Podras pagar cuando la tienda confirme el importe.',
+      );
+    }
   }
 
   private cardPayment(order: CardOrder, provider: PaymentProvider) {

@@ -1,6 +1,6 @@
 'use client';
 
-import { Bell, BellRing, Check, Package, X } from 'lucide-react';
+import { Bell, BellRing, Check, Package, Truck, X } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { formatDate, formatMoney } from '@/lib/format';
@@ -9,7 +9,7 @@ type AdminRequest = <T>(path: string, init?: RequestInit) => Promise<T>;
 
 type OrderNotification = {
   id: string;
-  type: 'ORDER_CREATED';
+  type: 'ORDER_CREATED' | 'SHIPPING_QUOTE_REQUESTED';
   title: string;
   message: string;
   readAt: string | null;
@@ -163,7 +163,7 @@ export function AdminNotificationCenter({
             transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
           >
             <header>
-              <div><span>Actividad</span><strong>Pedidos nuevos</strong></div>
+              <div><span>Actividad</span><strong>Pedidos y envíos</strong></div>
               <button aria-label="Cerrar notificaciones" onClick={() => setOpen(false)} type="button"><X size={16} /></button>
             </header>
 
@@ -175,21 +175,24 @@ export function AdminNotificationCenter({
             )}
 
             <div className="adminNotificationList">
-              {feed.data.length ? feed.data.map((item) => (
-                <button className={item.readAt ? '' : 'isUnread'} key={item.id} onClick={() => void markRead(item)} type="button">
-                  <span className="adminNotificationIcon"><Package size={17} /></span>
-                  <span>
-                    <strong>{item.order?.number ?? item.title}</strong>
-                    <small>{item.order?.customerName ?? item.message}</small>
-                    <time>{formatDate(item.createdAt, { dateStyle: undefined, day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</time>
-                  </span>
-                  <span>
-                    {item.order && <b>{formatMoney(item.order.totalCents, item.order.currency)}</b>}
-                    {!item.readAt && <i />}
-                  </span>
-                </button>
-              )) : (
-                <div className="adminNotificationEmpty"><Check size={22} /><strong>Todo al día</strong><span>Los pedidos nuevos aparecerán aquí.</span></div>
+              {feed.data.length ? feed.data.map((item) => {
+                const needsShippingQuote = item.type === 'SHIPPING_QUOTE_REQUESTED';
+                return (
+                  <button className={item.readAt ? '' : 'isUnread'} key={item.id} onClick={() => void markRead(item)} type="button">
+                    <span className="adminNotificationIcon">{needsShippingQuote ? <Truck size={17} /> : <Package size={17} />}</span>
+                    <span>
+                      <strong>{needsShippingQuote ? 'Cotizar envío' : (item.order?.number ?? item.title)}</strong>
+                      <small>{needsShippingQuote ? `${item.order?.number ?? ''} · ${item.message}` : (item.order?.customerName ?? item.message)}</small>
+                      <time>{formatDate(item.createdAt, { dateStyle: undefined, day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</time>
+                    </span>
+                    <span>
+                      {item.order && <b>{formatMoney(item.order.totalCents, item.order.currency)}</b>}
+                      {!item.readAt && <i />}
+                    </span>
+                  </button>
+                );
+              }) : (
+                <div className="adminNotificationEmpty"><Check size={22} /><strong>Todo al día</strong><span>Los pedidos y cotizaciones aparecerán aquí.</span></div>
               )}
             </div>
 

@@ -2,7 +2,6 @@
 
 import {
   ArrowRight,
-  Bell,
   Check,
   ChevronRight,
   Clock3,
@@ -81,15 +80,6 @@ export function CustomerDashboard() {
     router.replace(`/cuenta?tab=${next}`, { scroll: false });
   }
 
-  async function resendVerification() {
-    try {
-      await auth.request('/customer-auth/resend-verification', { method: 'POST' });
-      notify({ title: 'Correo enviado', description: 'Revisa tu bandeja para verificar la cuenta.', tone: 'success' });
-    } catch (error) {
-      notify({ title: 'No pudimos enviar el correo', description: errorMessage(error), tone: 'error' });
-    }
-  }
-
   async function removeFavorite(productId: string) {
     try {
       await auth.request(`/customers/me/wishlist/${productId}`, { method: 'DELETE' });
@@ -117,8 +107,6 @@ export function CustomerDashboard() {
       <header className="accountHeader">
         <div className="pageWidth"><div className="accountAvatar">{initials(profile?.firstName, profile?.lastName)}</div><div><span className="eyebrow">Tu espacio Fraîche</span><h1>Hola, {firstName}.</h1><p>Aquí vive todo lo que elegiste para ti.</p></div></div>
       </header>
-
-      {!profile?.emailVerifiedAt && !loading && <div className="verificationBanner"><div className="pageWidth"><Bell aria-hidden="true" size={18} /><p><strong>Verifica tu correo.</strong> Así podremos proteger tus pedidos y avisarte cada avance.</p><button onClick={resendVerification} type="button">Reenviar correo <ArrowRight aria-hidden="true" size={15} /></button></div></div>}
 
       <div className="accountNavMobile pageWidth">
         {navItems.map((item) => <button className={tab === item.id ? 'isActive' : ''} key={item.id} onClick={() => selectTab(item.id)} type="button"><item.icon aria-hidden="true" size={16} />{item.label}</button>)}

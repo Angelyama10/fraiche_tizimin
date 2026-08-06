@@ -17,6 +17,7 @@ import {
   Package,
   ShieldCheck,
   Sparkles,
+  Truck,
 } from 'lucide-react';
 import Image from 'next/image';
 import Link from 'next/link';
@@ -108,6 +109,37 @@ export function PaymentExperience({
       })
       .catch((requestError) => setError(errorMessage(requestError)));
   }, [auth, orderToken, returningFromStripe]);
+
+  useEffect(() => {
+    if (
+      auth.status !== 'authenticated' ||
+      order?.shippingQuoteStatus !== 'PENDING'
+    ) {
+      return;
+    }
+
+    let cancelled = false;
+    const refreshQuote = async () => {
+      try {
+        const refreshedOrder = await auth.request<Order>(`/orders/${orderToken}`);
+        if (!cancelled) {
+          setOrder(refreshedOrder);
+          setError(null);
+        }
+      } catch (requestError) {
+        if (!cancelled) setError(errorMessage(requestError));
+      }
+    };
+
+    const timer = window.setInterval(() => {
+      void refreshQuote();
+    }, 4_000);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [auth, order?.shippingQuoteStatus, orderToken]);
 
   if (auth.status === 'loading' || (auth.status === 'authenticated' && !order && !error)) {
     return <main className="paymentLoading"><span className="buttonSpinner" /> Preparando pago seguro...</main>;
@@ -251,21 +283,35 @@ export function PaymentExperience({
         <span>1. Revisión</span>
         <span>2. Entrega</span>
         <span>3. Método</span>
-        <strong aria-current="step">4. Pago seguro</strong>
+        <strong aria-current="step">
+          {order.shippingQuoteStatus === 'PENDING' ? '4. Cotización' : '4. Pago seguro'}
+        </strong>
       </nav>
       <div className="paymentLayout pageWidth">
         <section className="paymentPanel">
           <div className="paymentPanel__intro">
-            <span className="eyebrow">Pago seguro · {order.number}</span>
-            <h1>Una última nota para cerrar la compra.</h1>
-            <p>Completa tus datos en el formulario protegido de la pasarela.</p>
+            <span className="eyebrow">
+              {order.shippingQuoteStatus === 'PENDING' ? 'Envío nacional' : 'Pago seguro'} · {order.number}
+            </span>
+            <h1>
+              {order.shippingQuoteStatus === 'PENDING'
+                ? 'Estamos calculando tu envío.'
+                : 'Una última nota para cerrar la compra.'}
+            </h1>
+            <p>
+              {order.shippingQuoteStatus === 'PENDING'
+                ? 'La tienda revisará tu destino y añadirá el costo exacto antes de habilitar el pago.'
+                : 'Completa tus datos en el formulario protegido de la pasarela.'}
+            </p>
           </div>
           <div className="paymentTrust">
             <span><ShieldCheck size={18} /><strong>Protección antifraude</strong></span>
             <span><LockKeyhole size={18} /><strong>Datos tokenizados</strong></span>
             <span><Sparkles size={18} /><strong>Confirmación inmediata</strong></span>
           </div>
-          {!providerAvailable ? (
+          {order.shippingQuoteStatus === 'PENDING' ? (
+            <ShippingQuoteWaiting order={order} />
+          ) : !providerAvailable ? (
             <div className="paymentUnavailable">
               <CreditCard size={22} />
               <div>
@@ -292,6 +338,28 @@ export function PaymentExperience({
         <OrderPaymentSummary order={order} provider={currentProvider ?? 'Pasarela'} />
       </div>
     </main>
+  );
+}
+
+function ShippingQuoteWaiting({ order }: { order: Order }) {
+  return (
+    <section aria-live="polite" className="shippingQuoteWaiting">
+      <div aria-hidden="true" className="shippingQuoteWaiting__visual">
+        <Truck size={25} />
+        <span className="shippingQuoteWaiting__bottle"><i /></span>
+      </div>
+      <div>
+        <span className="eyebrow">Cotización en proceso</span>
+        <h2>Tu pedido está reservado.</h2>
+        <p>
+          En cuanto la tienda confirme el envío, el total se actualizará aquí
+          automáticamente y podrás pagar con el método que elegiste.
+        </p>
+        <Link href={`/pedidos/${order.publicToken}`}>
+          Ver seguimiento <ArrowRight size={15} />
+        </Link>
+      </div>
+    </section>
   );
 }
 
@@ -522,6 +590,14 @@ function OrderPaymentSummary({ order, provider }: { order: Order; provider: stri
       <div className="paymentSummary__totals">
         <span><small>Subtotal</small><strong>{formatMoney(order.subtotalCents, order.currency)}</strong></span>
         {order.discountCents > 0 && <span><small>Descuento</small><strong>− {formatMoney(order.discountCents, order.currency)}</strong></span>}
+        <span>
+          <small>Envío</small>
+          <strong>
+            {order.shippingQuoteStatus === 'PENDING'
+              ? 'Por cotizar'
+              : formatMoney(order.shippingCents, order.currency)}
+          </strong>
+        </span>
         <span><small>Total</small><strong>{formatMoney(order.totalCents, order.currency)}</strong></span>
       </div>
       <p><ShieldCheck size={15} /> Procesado por {provider === 'MERCADO_PAGO' ? 'Mercado Pago' : provider === 'STRIPE' ? 'Stripe' : provider}</p>

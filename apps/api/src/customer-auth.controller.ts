@@ -69,7 +69,12 @@ export class CustomerAuthController {
   @Post('refresh')
   @HttpCode(200)
   async refresh(@Req() request: Request, @Res({ passthrough: true }) response: Response) {
-    const result = await this.auth.refresh(request.cookies?.[this.cookieName()]);
+    const refreshToken = request.cookies?.[this.cookieName()];
+    if (!refreshToken) {
+      response.clearCookie(this.cookieName(), this.cookieOptions());
+      return { authenticated: false };
+    }
+    const result = await this.auth.refresh(refreshToken);
     return this.withRefreshCookie(response, result);
   }
 

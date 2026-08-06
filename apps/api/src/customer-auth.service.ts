@@ -57,28 +57,17 @@ export class CustomerAuthService {
     }
 
     const passwordHash = await this.hashPassword(input.password);
-    const customer = await this.prisma.$transaction(async (transaction) => {
-      const created = await transaction.customer.create({
-        data: {
-          email,
-          passwordHash,
-          passwordChangedAt: new Date(),
-          firstName: input.firstName.trim(),
-          lastName: input.lastName.trim(),
-          phone: input.phone.trim(),
-          marketingOptIn: input.marketingOptIn ?? false,
-        },
-      });
-      await transaction.outboxEvent.create({
-        data: {
-          type: 'CUSTOMER_EMAIL_VERIFICATION_REQUESTED',
-          aggregateType: 'Customer',
-          aggregateId: created.id,
-          deduplicationKey: `EMAIL_VERIFICATION:${created.id}:REGISTER`,
-          payload: { customerId: created.id },
-        },
-      });
-      return created;
+    const customer = await this.prisma.customer.create({
+      data: {
+        email,
+        emailVerifiedAt: new Date(),
+        passwordHash,
+        passwordChangedAt: new Date(),
+        firstName: input.firstName.trim(),
+        lastName: input.lastName.trim(),
+        phone: input.phone.trim(),
+        marketingOptIn: input.marketingOptIn ?? false,
+      },
     });
 
     return this.issueSession(customer, metadata);
@@ -268,15 +257,22 @@ export class CustomerAuthService {
     });
     if (!customer?.email) throw new UnauthorizedException('La cuenta no esta disponible.');
     if (customer.emailVerifiedAt) return { emailVerified: true };
-    const day = new Date().toISOString().slice(0, 10);
+    const fiveMinuteWindow = Math.floor(Date.now() / (5 * 60 * 1000));
+    const deduplicationKey = `EMAIL_VERIFICATION:${customer.id}:${fiveMinuteWindow}`;
     await this.prisma.outboxEvent.upsert({
-      where: { deduplicationKey: `EMAIL_VERIFICATION:${customer.id}:${day}` },
-      update: {},
+      where: { deduplicationKey },
+      update: {
+        status: 'PENDING',
+        attempts: 0,
+        availableAt: new Date(),
+        processedAt: null,
+        lastError: null,
+      },
       create: {
         type: 'CUSTOMER_EMAIL_VERIFICATION_REQUESTED',
         aggregateType: 'Customer',
         aggregateId: customer.id,
-        deduplicationKey: `EMAIL_VERIFICATION:${customer.id}:${day}`,
+        deduplicationKey,
         payload: { customerId: customer.id },
       },
     });
@@ -312,6 +308,7 @@ export class CustomerAuthService {
       lastName: string | null;
       phone: string | null;
       marketingOptIn: boolean;
+      emailVerifiedAt: Date | null;
     },
     metadata: SessionMetadata,
   ) {
@@ -341,6 +338,7 @@ export class CustomerAuthService {
     lastName: string | null;
     phone: string | null;
     marketingOptIn: boolean;
+    emailVerifiedAt: Date | null;
   }) {
     if (!customer.email) throw new UnauthorizedException('La cuenta no tiene correo.');
     return {
@@ -357,6 +355,7 @@ export class CustomerAuthService {
         lastName: customer.lastName,
         phone: customer.phone,
         marketingOptIn: customer.marketingOptIn,
+        emailVerifiedAt: customer.emailVerifiedAt,
       },
     };
   }

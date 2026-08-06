@@ -296,7 +296,8 @@ export function CheckoutExperience() {
 
   async function placeOrder(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!cart || !canCheckout) return;
+    if (!cart) return;
+    if (!canCheckout) return;
     const issue = deliveryIssue(deliveryMethod, newAddress, addressId, address);
     if (issue) {
       notify({ title: 'Revisa la entrega', description: issue, tone: 'info' });

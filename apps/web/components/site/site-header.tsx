@@ -3,6 +3,7 @@
 import {
   ChevronDown,
   Heart,
+  LogOut,
   Menu,
   Search,
   ShoppingBag,
@@ -40,7 +41,7 @@ export function SiteHeader({
     FALLBACK_CATALOG_NAVIGATION,
   );
   const pathname = usePathname();
-  const { customer } = useAuth();
+  const { customer, logout } = useAuth();
   const { cart, setDrawerOpen } = useCart();
 
   useEffect(() => {
@@ -68,6 +69,12 @@ export function SiteHeader({
 
   function closeMenu() {
     setMenuOpen(false);
+  }
+
+  async function closeSession() {
+    closeMenu();
+    await logout();
+    window.location.assign('/');
   }
 
   return (
@@ -168,6 +175,17 @@ export function SiteHeader({
             <Link aria-label="Mi cuenta" className="iconButton" href="/cuenta" title="Mi cuenta">
               {customer ? <span className="headerAvatar">{customer.firstName?.[0] ?? 'F'}</span> : <UserRound aria-hidden="true" size={20} />}
             </Link>
+            {customer && (
+              <button
+                aria-label="Cerrar sesión"
+                className="iconButton headerActions__optional"
+                onClick={() => { void closeSession(); }}
+                title="Cerrar sesión"
+                type="button"
+              >
+                <LogOut aria-hidden="true" size={19} />
+              </button>
+            )}
             <button
               aria-label={`Carrito con ${cart?.itemCount ?? 0} productos`}
               className="iconButton cartIconButton"
@@ -234,6 +252,15 @@ export function SiteHeader({
                 <UserRound aria-hidden="true" size={18} />
                 {customer ? `Hola, ${customer.firstName}` : 'Entrar o crear cuenta'}
               </Link>
+              {customer && (
+                <button
+                  className="mobileMenu__logout"
+                  onClick={() => { void closeSession(); }}
+                  type="button"
+                >
+                  <LogOut aria-hidden="true" size={18} /> Cerrar sesión
+                </button>
+              )}
             </motion.aside>
           </>
         )}

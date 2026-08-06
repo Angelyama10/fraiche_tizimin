@@ -41,8 +41,15 @@ export function AuthGateway() {
           phone: String(form.get('phone') ?? ''),
           marketingOptIn: form.get('marketingOptIn') === 'on',
         });
+        notify({
+          title: 'Tu cuenta está lista',
+          description: 'Ya puedes comprar y seguir tus pedidos desde tu perfil.',
+          tone: 'success',
+        });
+        router.replace(searchParams.get('redirect') || '/cuenta');
+        return;
       }
-      notify({ title: mode === 'login' ? 'Qué gusto verte de nuevo' : 'Tu cuenta está lista', description: 'Tu carrito y tus favoritos te acompañan.', tone: 'success' });
+      notify({ title: 'Qué gusto verte de nuevo', description: 'Tu carrito y tus favoritos te acompañan.', tone: 'success' });
       router.replace(searchParams.get('redirect') || '/cuenta');
     } catch (error) {
       notify({ title: mode === 'login' ? 'No pudimos iniciar sesión' : 'No pudimos crear tu cuenta', description: errorMessage(error), tone: 'error' });

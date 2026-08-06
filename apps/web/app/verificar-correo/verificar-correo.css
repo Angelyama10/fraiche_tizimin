@@ -38,6 +38,18 @@
   background: #ffe2df;
 }
 
+.verifyEmailIcon.isPending {
+  color: #0d4f43;
+  background: #edf5f2;
+}
+
+.verifyEmailSpinner {
+  width: 26px;
+  height: 26px;
+  border-color: rgba(13, 79, 67, 0.2);
+  border-top-color: #0d4f43;
+}
+
 .verifyEmailPanel h1 {
   margin: 12px auto 14px;
   max-width: 620px;
@@ -53,6 +65,19 @@
   color: var(--color-muted);
   font-size: 1.04rem;
   line-height: 1.7;
+}
+
+.verifyEmailAddress {
+  width: fit-content;
+  margin-top: 18px !important;
+  padding: 10px 14px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid rgba(13, 79, 67, 0.14);
+  background: rgba(237, 245, 242, 0.82);
+  color: var(--color-ink) !important;
+  font-weight: 700;
 }
 
 .verifyEmailActions {

@@ -3,6 +3,7 @@ import { Cormorant_Garamond, Manrope } from 'next/font/google';
 import { AppProviders } from '@/providers/app-providers';
 import { SiteShell } from '@/components/site-shell';
 import { AnalyticsConsent } from '@/components/site/analytics-consent';
+import { AssetRecovery } from '@/components/site/asset-recovery';
 import { getPublishedSiteContent } from '@/lib/site-content';
 import { jsonLd, organizationSchema, SITE_URL } from '@/lib/seo';
 import './globals.css';
@@ -65,6 +66,7 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
           dangerouslySetInnerHTML={{ __html: jsonLd(organizationSchema(siteContent.global)) }}
           type="application/ld+json"
         />
+        <AssetRecovery />
         <AppProviders>
           <SiteShell content={siteContent}>{children}</SiteShell>
         </AppProviders>

@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import {
   BadRequestException,
   ConflictException,
@@ -5,13 +6,18 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import {
+  AdminNotificationType,
+  DeliveryMethod,
   OrderStatus,
   PaymentMethod,
   PaymentStatus,
   PricingMode,
   Prisma,
   ProductLine,
+  ProductStatus,
   PromotionType,
+  ReservationStatus,
+  ShippingQuoteStatus,
 } from '@prisma/client';
 import {
   BulkUpdatePricesDto,
@@ -19,13 +25,25 @@ import {
   ListAdminInventoryDto,
   ListAdminOrdersDto,
   ListAdminProductsDto,
+  ListPriceAdjustmentsDto,
   ListPromotionsDto,
+  PercentagePriceAdjustmentDto,
+  SetShippingQuoteDto,
   UpdateOrderStatusDto,
   UpdatePricingPolicyDto,
   UpdatePromotionDto,
 } from './admin-commerce.dto';
-import { canTransitionOrder, fulfillmentForOrderStatus } from './commerce-rules';
+import {
+  canTransitionOrder,
+  fulfillmentForOrderStatus,
+  reservationLifetimeMs,
+} from './commerce-rules';
 import { OrdersService } from './orders.service';
+import {
+  calculateAdjustedPriceCents,
+  PriceAdjustmentDirection,
+  PriceAdjustmentScope,
+} from './price-adjustment';
 import { PrismaService } from './prisma.service';
 
 type RevenueRow = {
@@ -41,6 +59,61 @@ type InventorySummaryRow = {
   reserved: bigint;
   lowStock: bigint;
   outOfStock: bigint;
+};
+
+type VariantPriceAdjustment = {
+  kind: 'VARIANT';
+  id: string;
+  productId: string;
+  productName: string;
+  sku: string;
+  line: ProductLine;
+  currentPriceCents: number;
+  nextPriceCents: number;
+  currentCompareAtPriceCents: number | null;
+  nextCompareAtPriceCents: number | null;
+};
+
+type PolicyPriceAdjustment = {
+  kind: 'POLICY';
+  id: string;
+  line: ProductLine;
+  currentPriceCents: number;
+  nextPriceCents: number;
+};
+
+type PriceAdjustmentChange = VariantPriceAdjustment | PolicyPriceAdjustment;
+
+type PriceAdjustmentPlan = {
+  changes: PriceAdjustmentChange[];
+  response: {
+    generatedAt: Date;
+    summary: {
+      affectedProducts: number;
+      affectedVariants: number;
+      affectedFixedVariants: number;
+      affectedFixedPolicies: number;
+      skippedFixedVariants: number;
+      skippedMissingPrices: number;
+      unchanged: number;
+      currentMinimumCents: number | null;
+      currentMaximumCents: number | null;
+      nextMinimumCents: number | null;
+      nextMaximumCents: number | null;
+      totalDeltaCents: number;
+    };
+    sample: Array<{
+      kind: 'VARIANT' | 'POLICY';
+      id: string;
+      label: string;
+      sku: string | null;
+      line: ProductLine;
+      currentPriceCents: number;
+      nextPriceCents: number;
+      differenceCents: number;
+    }>;
+    warnings: string[];
+  };
 };
 
 @Injectable()
@@ -295,6 +368,137 @@ export class AdminCommerceService {
     });
     if (!order) throw new NotFoundException('Orden no encontrada.');
     return order;
+  }
+
+  async setShippingQuote(
+    publicToken: string,
+    input: SetShippingQuoteDto,
+    actorId: string,
+  ) {
+    await this.prisma.$transaction(
+      async (transaction) => {
+        const order = await transaction.order.findUnique({
+          where: { publicToken },
+          include: {
+            items: { include: { reservation: true } },
+            payments: { orderBy: { createdAt: 'desc' } },
+          },
+        });
+        if (!order) throw new NotFoundException('Orden no encontrada.');
+        if (order.status !== OrderStatus.PENDING_PAYMENT) {
+          throw new ConflictException('Solo se puede cotizar una orden pendiente de pago.');
+        }
+        if (order.deliveryMethod !== DeliveryMethod.SHIPPING) {
+          throw new BadRequestException('Esta orden no requiere una cotizacion de paqueteria.');
+        }
+        if (
+          order.shippingQuoteStatus !== ShippingQuoteStatus.PENDING &&
+          order.shippingQuoteStatus !== ShippingQuoteStatus.QUOTED
+        ) {
+          throw new ConflictException('La orden no esta esperando una cotizacion de envio.');
+        }
+        if (
+          new Set<PaymentStatus>([
+            PaymentStatus.IN_PROCESS,
+            PaymentStatus.APPROVED,
+            PaymentStatus.REFUNDED,
+            PaymentStatus.CHARGED_BACK,
+          ]).has(order.paymentStatus)
+        ) {
+          throw new ConflictException('El envio no puede cambiarse despues de iniciar el cobro.');
+        }
+
+        const activePayment = order.payments.find(
+          (payment) =>
+            !new Set<PaymentStatus>([
+              PaymentStatus.CANCELLED,
+              PaymentStatus.REFUNDED,
+              PaymentStatus.CHARGED_BACK,
+            ]).has(payment.status),
+        );
+        if (!activePayment) {
+          throw new ConflictException('La orden no tiene un pago pendiente que pueda actualizarse.');
+        }
+        if (
+          activePayment.providerPaymentId ||
+          activePayment.providerPreferenceId ||
+          activePayment.checkoutUrl
+        ) {
+          throw new ConflictException(
+            'El cobro ya fue iniciado. Cancela el intento antes de cambiar el envio.',
+          );
+        }
+
+        const now = new Date();
+        const activeReservations = order.items.flatMap((item) =>
+          item.reservation?.status === ReservationStatus.ACTIVE ? [item.reservation] : [],
+        );
+        if (
+          activeReservations.length !== order.items.length ||
+          activeReservations.some((reservation) => reservation.expiresAt <= now)
+        ) {
+          throw new ConflictException(
+            'La reserva de inventario vencio. Pide al cliente crear nuevamente el pedido.',
+          );
+        }
+
+        const shippingCents = input.shippingCents;
+        const totalCents = Math.max(
+          0,
+          order.subtotalCents - order.discountCents + shippingCents,
+        );
+        const expiresAt = new Date(now.getTime() + reservationLifetimeMs(order.paymentMethod));
+
+        await transaction.inventoryReservation.updateMany({
+          where: { id: { in: activeReservations.map((reservation) => reservation.id) } },
+          data: { expiresAt },
+        });
+        await transaction.payment.update({
+          where: { id: activePayment.id },
+          data: { amountCents: totalCents },
+        });
+        await transaction.order.update({
+          where: { id: order.id },
+          data: {
+            shippingCents,
+            totalCents,
+            shippingQuoteStatus: ShippingQuoteStatus.QUOTED,
+            shippingQuotedAt: now,
+            shippingQuoteNotes: input.notes?.trim() || null,
+            expiresAt,
+          },
+        });
+        await transaction.adminNotification.updateMany({
+          where: {
+            orderId: order.id,
+            type: AdminNotificationType.SHIPPING_QUOTE_REQUESTED,
+            readAt: null,
+          },
+          data: { readAt: now },
+        });
+        await transaction.auditLog.create({
+          data: {
+            actorId,
+            action: 'ORDER_SHIPPING_QUOTED',
+            entityType: 'Order',
+            entityId: order.id,
+            before: {
+              shippingCents: order.shippingCents,
+              totalCents: order.totalCents,
+              shippingQuoteStatus: order.shippingQuoteStatus,
+            },
+            after: {
+              shippingCents,
+              totalCents,
+              shippingQuoteStatus: ShippingQuoteStatus.QUOTED,
+              expiresAt,
+            },
+          },
+        });
+      },
+      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+    );
+    return this.getOrder(publicToken);
   }
 
   async updateOrderStatus(
@@ -613,6 +817,444 @@ export class AdminCommerceService {
       }
     });
     return { updated: variants.length };
+  }
+
+  async previewPercentagePriceAdjustment(input: PercentagePriceAdjustmentDto) {
+    this.validatePercentagePriceAdjustment(input);
+    const plan = await this.prisma.$transaction((transaction) =>
+      this.preparePercentagePriceAdjustment(input, transaction),
+    );
+    return plan.response;
+  }
+
+  async applyPercentagePriceAdjustment(
+    input: PercentagePriceAdjustmentDto,
+    actorId: string,
+  ) {
+    this.validatePercentagePriceAdjustment(input);
+    if (input.confirmed !== true) {
+      throw new BadRequestException(
+        'Confirma explicitamente la actualizacion despues de revisar la vista previa.',
+      );
+    }
+
+    return this.prisma.$transaction(
+      async (transaction) => {
+        const plan = await this.preparePercentagePriceAdjustment(input, transaction);
+        if (!plan.changes.length) {
+          throw new BadRequestException('No hay precios que cambiar con esta seleccion.');
+        }
+
+        const variantChanges = plan.changes.filter(
+          (change): change is VariantPriceAdjustment => change.kind === 'VARIANT',
+        );
+        const policyChanges = plan.changes.filter(
+          (change): change is PolicyPriceAdjustment => change.kind === 'POLICY',
+        );
+
+        for (const chunk of this.chunk(variantChanges, 300)) {
+          const rows = chunk.map((change) =>
+            Prisma.sql`(
+              ${change.id},
+              ${change.nextPriceCents},
+              ${change.nextCompareAtPriceCents}
+            )`,
+          );
+          await transaction.$executeRaw(Prisma.sql`
+            UPDATE "ProductVariant" AS target
+            SET
+              "catalogPriceCents" = changes."catalogPriceCents"::integer,
+              "compareAtPriceCents" = changes."compareAtPriceCents"::integer,
+              "updatedAt" = NOW()
+            FROM (
+              VALUES ${Prisma.join(rows)}
+            ) AS changes("id", "catalogPriceCents", "compareAtPriceCents")
+            WHERE target."id" = changes."id"::text
+          `);
+        }
+
+        for (const change of policyChanges) {
+          await transaction.linePricingPolicy.update({
+            where: { id: change.id },
+            data: { fixedPriceCents: change.nextPriceCents },
+          });
+        }
+
+        const batchId = randomUUID();
+        const requestSnapshot = this.priceAdjustmentRequestSnapshot(input);
+        await transaction.auditLog.create({
+          data: {
+            actorId,
+            action: 'PRICE_PERCENTAGE_ADJUSTMENT_APPLIED',
+            entityType: 'PriceAdjustmentBatch',
+            entityId: batchId,
+            before: requestSnapshot,
+            after: {
+              summary: plan.response.summary,
+              warnings: plan.response.warnings,
+              changes: plan.changes,
+            } as Prisma.InputJsonValue,
+          },
+        });
+
+        return {
+          ...plan.response,
+          batchId,
+          appliedAt: new Date(),
+        };
+      },
+      { maxWait: 5_000, timeout: 30_000 },
+    );
+  }
+
+  async listPriceAdjustments(query: ListPriceAdjustmentsDto) {
+    const where: Prisma.AuditLogWhereInput = {
+      action: 'PRICE_PERCENTAGE_ADJUSTMENT_APPLIED',
+      entityType: 'PriceAdjustmentBatch',
+    };
+    const [entries, total] = await this.prisma.$transaction([
+      this.prisma.auditLog.findMany({
+        where,
+        include: {
+          actor: { select: { id: true, name: true, email: true } },
+        },
+        orderBy: { createdAt: 'desc' },
+        skip: (query.page - 1) * query.pageSize,
+        take: query.pageSize,
+      }),
+      this.prisma.auditLog.count({ where }),
+    ]);
+
+    return this.page(
+      entries.map((entry) => {
+        const request = this.jsonRecord(entry.before);
+        const result = this.jsonRecord(entry.after);
+        return {
+          id: entry.id,
+          batchId: entry.entityId,
+          createdAt: entry.createdAt,
+          actor: entry.actor,
+          reason: typeof request.reason === 'string' ? request.reason : '',
+          request,
+          summary: this.jsonRecord(result.summary),
+          warnings: Array.isArray(result.warnings) ? result.warnings : [],
+        };
+      }),
+      total,
+      query.page,
+      query.pageSize,
+    );
+  }
+
+  private async preparePercentagePriceAdjustment(
+    input: PercentagePriceAdjustmentDto,
+    transaction: Prisma.TransactionClient,
+  ): Promise<PriceAdjustmentPlan> {
+    await this.validatePriceAdjustmentReference(input, transaction);
+    const productWhere = this.priceAdjustmentProductWhere(input);
+    const variants = await transaction.productVariant.findMany({
+      where: {
+        isActive: true,
+        product: { is: productWhere },
+      },
+      select: {
+        id: true,
+        productId: true,
+        sku: true,
+        catalogPriceCents: true,
+        compareAtPriceCents: true,
+        product: {
+          select: {
+            name: true,
+            line: true,
+            linePricingPolicy: {
+              select: {
+                id: true,
+                line: true,
+                pricingMode: true,
+                fixedPriceCents: true,
+                isActive: true,
+              },
+            },
+          },
+        },
+      },
+      orderBy: { sku: 'asc' },
+      take: 5_001,
+    });
+    if (variants.length > 5_000) {
+      throw new BadRequestException(
+        'La seleccion supera 5000 variantes. Divide la actualizacion por linea, marca o categoria.',
+      );
+    }
+
+    const warnings: string[] = [];
+    const changes: PriceAdjustmentChange[] = [];
+    const affectedProductIds = new Set<string>();
+    const fixedLines = new Map<
+      ProductLine,
+      {
+        id: string;
+        currentPriceCents: number;
+        productIds: Set<string>;
+        variantCount: number;
+      }
+    >();
+    const effectivePrices: Array<{ current: number; next: number }> = [];
+    let skippedFixedVariants = 0;
+    let skippedMissingPrices = 0;
+    let unchanged = 0;
+    let affectedFixedVariants = 0;
+
+    for (const variant of variants) {
+      const policy = variant.product.linePricingPolicy;
+      if (
+        policy.isActive &&
+        policy.pricingMode === PricingMode.FIXED_BY_LINE &&
+        policy.fixedPriceCents !== null
+      ) {
+        const existing = fixedLines.get(policy.line) ?? {
+          id: policy.id,
+          currentPriceCents: policy.fixedPriceCents,
+          productIds: new Set<string>(),
+          variantCount: 0,
+        };
+        existing.productIds.add(variant.productId);
+        existing.variantCount += 1;
+        fixedLines.set(policy.line, existing);
+        continue;
+      }
+
+      if (variant.catalogPriceCents === null || variant.catalogPriceCents <= 0) {
+        skippedMissingPrices += 1;
+        continue;
+      }
+      const nextPriceCents = calculateAdjustedPriceCents({
+        currentPriceCents: variant.catalogPriceCents,
+        direction: input.direction,
+        percentage: input.percentage,
+        rounding: input.rounding,
+      });
+      const nextCompareAtPriceCents =
+        variant.compareAtPriceCents === null
+          ? null
+          : Math.max(
+              nextPriceCents,
+              calculateAdjustedPriceCents({
+                currentPriceCents: variant.compareAtPriceCents,
+                direction: input.direction,
+                percentage: input.percentage,
+                rounding: input.rounding,
+              }),
+            );
+      effectivePrices.push({ current: variant.catalogPriceCents, next: nextPriceCents });
+      if (
+        nextPriceCents === variant.catalogPriceCents &&
+        nextCompareAtPriceCents === variant.compareAtPriceCents
+      ) {
+        unchanged += 1;
+        continue;
+      }
+      affectedProductIds.add(variant.productId);
+      changes.push({
+        kind: 'VARIANT',
+        id: variant.id,
+        productId: variant.productId,
+        productName: variant.product.name,
+        sku: variant.sku,
+        line: variant.product.line,
+        currentPriceCents: variant.catalogPriceCents,
+        nextPriceCents,
+        currentCompareAtPriceCents: variant.compareAtPriceCents,
+        nextCompareAtPriceCents,
+      });
+    }
+
+    const canUpdateFixedPolicies =
+      input.includeFixedPolicies !== false &&
+      (input.scope === PriceAdjustmentScope.ALL ||
+        input.scope === PriceAdjustmentScope.LINE);
+    for (const [line, policy] of fixedLines) {
+      if (!canUpdateFixedPolicies) {
+        skippedFixedVariants += policy.variantCount;
+        continue;
+      }
+      const nextPriceCents = calculateAdjustedPriceCents({
+        currentPriceCents: policy.currentPriceCents,
+        direction: input.direction,
+        percentage: input.percentage,
+        rounding: input.rounding,
+      });
+      for (let index = 0; index < policy.variantCount; index += 1) {
+        effectivePrices.push({ current: policy.currentPriceCents, next: nextPriceCents });
+      }
+      if (nextPriceCents === policy.currentPriceCents) {
+        unchanged += policy.variantCount;
+        continue;
+      }
+      policy.productIds.forEach((productId) => affectedProductIds.add(productId));
+      affectedFixedVariants += policy.variantCount;
+      changes.push({
+        kind: 'POLICY',
+        id: policy.id,
+        line,
+        currentPriceCents: policy.currentPriceCents,
+        nextPriceCents,
+      });
+    }
+
+    if (fixedLines.size && !canUpdateFixedPolicies) {
+      warnings.push(
+        input.scope === PriceAdjustmentScope.BRAND ||
+          input.scope === PriceAdjustmentScope.CATEGORY
+          ? 'Se omitieron productos con precio fijo por linea: cambiar su politica afectaria productos fuera de este filtro.'
+          : 'Se omitieron productos con precio fijo por linea porque la opcion correspondiente esta desactivada.',
+      );
+    }
+    if (skippedMissingPrices) {
+      warnings.push(
+        `${skippedMissingPrices} variantes sin precio de catalogo valido fueron omitidas.`,
+      );
+    }
+
+    const variantChanges = changes.filter(
+      (change): change is VariantPriceAdjustment => change.kind === 'VARIANT',
+    );
+    const policyChanges = changes.filter(
+      (change): change is PolicyPriceAdjustment => change.kind === 'POLICY',
+    );
+    const currentPrices = effectivePrices.map((price) => price.current);
+    const nextPrices = effectivePrices.map((price) => price.next);
+    const summary = {
+      affectedProducts: affectedProductIds.size,
+      affectedVariants: variantChanges.length,
+      affectedFixedVariants,
+      affectedFixedPolicies: policyChanges.length,
+      skippedFixedVariants,
+      skippedMissingPrices,
+      unchanged,
+      currentMinimumCents: currentPrices.length ? Math.min(...currentPrices) : null,
+      currentMaximumCents: currentPrices.length ? Math.max(...currentPrices) : null,
+      nextMinimumCents: nextPrices.length ? Math.min(...nextPrices) : null,
+      nextMaximumCents: nextPrices.length ? Math.max(...nextPrices) : null,
+      totalDeltaCents: effectivePrices.reduce(
+        (total, price) => total + price.next - price.current,
+        0,
+      ),
+    };
+    const sample = changes.slice(0, 12).map((change) => ({
+      kind: change.kind,
+      id: change.id,
+      label:
+        change.kind === 'VARIANT'
+          ? change.productName
+          : `Politica de linea ${change.line}`,
+      sku: change.kind === 'VARIANT' ? change.sku : null,
+      line: change.line,
+      currentPriceCents: change.currentPriceCents,
+      nextPriceCents: change.nextPriceCents,
+      differenceCents: change.nextPriceCents - change.currentPriceCents,
+    }));
+
+    return {
+      changes,
+      response: {
+        generatedAt: new Date(),
+        summary,
+        sample,
+        warnings,
+      },
+    };
+  }
+
+  private validatePercentagePriceAdjustment(input: PercentagePriceAdjustmentDto) {
+    if (
+      input.direction === PriceAdjustmentDirection.DECREASE &&
+      input.percentage >= 100
+    ) {
+      throw new BadRequestException('Una reduccion debe ser menor a 100%.');
+    }
+    if (input.reason.trim().length < 5) {
+      throw new BadRequestException('Describe brevemente el motivo del cambio.');
+    }
+    if (input.scope === PriceAdjustmentScope.LINE && !input.line) {
+      throw new BadRequestException('Selecciona la linea que deseas actualizar.');
+    }
+    if (input.scope === PriceAdjustmentScope.BRAND && !input.brandId) {
+      throw new BadRequestException('Selecciona la marca que deseas actualizar.');
+    }
+    if (input.scope === PriceAdjustmentScope.CATEGORY && !input.categoryId) {
+      throw new BadRequestException('Selecciona la categoria que deseas actualizar.');
+    }
+  }
+
+  private async validatePriceAdjustmentReference(
+    input: PercentagePriceAdjustmentDto,
+    transaction: Prisma.TransactionClient,
+  ) {
+    if (
+      input.scope === PriceAdjustmentScope.BRAND &&
+      input.brandId &&
+      !(await transaction.brand.findUnique({ where: { id: input.brandId }, select: { id: true } }))
+    ) {
+      throw new NotFoundException('Marca no encontrada.');
+    }
+    if (
+      input.scope === PriceAdjustmentScope.CATEGORY &&
+      input.categoryId &&
+      !(await transaction.category.findUnique({
+        where: { id: input.categoryId },
+        select: { id: true },
+      }))
+    ) {
+      throw new NotFoundException('Categoria no encontrada.');
+    }
+  }
+
+  private priceAdjustmentProductWhere(
+    input: PercentagePriceAdjustmentDto,
+  ): Prisma.ProductWhereInput {
+    return {
+      status: input.includeDrafts
+        ? { in: [ProductStatus.ACTIVE, ProductStatus.DRAFT] }
+        : ProductStatus.ACTIVE,
+      ...(input.scope === PriceAdjustmentScope.LINE ? { line: input.line } : {}),
+      ...(input.scope === PriceAdjustmentScope.BRAND ? { brandId: input.brandId } : {}),
+      ...(input.scope === PriceAdjustmentScope.CATEGORY
+        ? { categories: { some: { categoryId: input.categoryId } } }
+        : {}),
+    };
+  }
+
+  private priceAdjustmentRequestSnapshot(
+    input: PercentagePriceAdjustmentDto,
+  ): Prisma.InputJsonValue {
+    return {
+      direction: input.direction,
+      percentage: input.percentage,
+      scope: input.scope,
+      line: input.line ?? null,
+      brandId: input.brandId ?? null,
+      categoryId: input.categoryId ?? null,
+      includeDrafts: input.includeDrafts ?? false,
+      includeFixedPolicies: input.includeFixedPolicies ?? true,
+      rounding: input.rounding,
+      reason: input.reason.trim(),
+    };
+  }
+
+  private jsonRecord(value: unknown): Record<string, unknown> {
+    return value && typeof value === 'object' && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
+      : {};
+  }
+
+  private chunk<T>(values: T[], size: number) {
+    const chunks: T[][] = [];
+    for (let index = 0; index < values.length; index += size) {
+      chunks.push(values.slice(index, index + size));
+    }
+    return chunks;
   }
 
   private validatePromotion(input: {

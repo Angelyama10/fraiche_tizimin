@@ -192,6 +192,7 @@ export type CustomerSummary = {
   lastName: string | null;
   phone: string | null;
   marketingOptIn: boolean;
+  emailVerifiedAt: string | null;
 };
 
 export type AuthResponse = {
@@ -264,6 +265,9 @@ export type Order = {
   subtotalCents: number;
   discountCents: number;
   shippingCents: number;
+  shippingQuoteStatus: 'NOT_REQUIRED' | 'PENDING' | 'QUOTED';
+  shippingQuotedAt?: string | null;
+  shippingQuoteNotes?: string | null;
   totalCents: number;
   shippingAddress?: Record<string, string | null> | null;
   customerNotes?: string | null;

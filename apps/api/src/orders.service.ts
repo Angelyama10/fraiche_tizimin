@@ -20,6 +20,7 @@ import {
   StockMovementType,
   TransferProofStatus,
   UserRole,
+  ShippingQuoteStatus,
 } from '@prisma/client';
 import { CreateOrderDto, ListCustomerOrdersDto, UpdatePendingOrderDto } from './order.dto';
 import {
@@ -30,6 +31,10 @@ import {
 } from './commerce-rules';
 import { PricingService } from './pricing.service';
 import { PrismaService } from './prisma.service';
+import {
+  resolveShippingQuote,
+  SHIPPING_QUOTE_RESERVATION_MS,
+} from './shipping-quote';
 
 const orderInclude = {
   items: { orderBy: { createdAt: 'asc' as const } },
@@ -91,7 +96,6 @@ export class OrdersService {
     input: UpdatePendingOrderDto,
     customerId: string,
   ) {
-    this.validateDeliveryPaymentPair(input.paymentMethod, input.deliveryMethod);
     for (let attempt = 1; attempt <= 3; attempt += 1) {
       try {
         await this.prisma.$transaction(
@@ -145,6 +149,33 @@ export class OrdersService {
               customerId,
               input,
             );
+            const addressChanged =
+              JSON.stringify(order.shippingAddress ?? null) !==
+              JSON.stringify(shippingAddress ?? null);
+            const requestedQuote = resolveShippingQuote(
+              input.deliveryMethod,
+              shippingAddress as Record<string, unknown> | undefined,
+            );
+            const preserveExistingQuote =
+              !addressChanged &&
+              order.deliveryMethod === DeliveryMethod.SHIPPING &&
+              requestedQuote.deliveryMethod === DeliveryMethod.SHIPPING &&
+              order.shippingQuoteStatus === ShippingQuoteStatus.QUOTED;
+            const shippingQuote = preserveExistingQuote
+              ? {
+                  deliveryMethod: order.deliveryMethod,
+                  shippingCents: order.shippingCents,
+                  status: order.shippingQuoteStatus,
+                  quotedAt: order.shippingQuotedAt,
+                  notes: order.shippingQuoteNotes,
+                }
+              : requestedQuote;
+            this.validateDeliveryPaymentPair(
+              input.paymentMethod,
+              shippingQuote.deliveryMethod,
+            );
+            const totalCents =
+              order.subtotalCents - order.discountCents + shippingQuote.shippingCents;
             const paymentProvider = this.resolvePaymentProvider(input);
             const currentPayment = order.payments.find(
               (payment) =>
@@ -154,12 +185,18 @@ export class OrdersService {
             );
             const choicesChanged =
               order.paymentMethod !== input.paymentMethod ||
-              currentPayment?.provider !== paymentProvider;
+              currentPayment?.provider !== paymentProvider ||
+              order.deliveryMethod !== shippingQuote.deliveryMethod ||
+              addressChanged ||
+              order.totalCents !== totalCents;
             const maximumReservationAt = new Date(
               order.createdAt.getTime() + reservationLifetimeMs(PaymentMethod.CASH),
             );
             const requestedExpiration = new Date(
-              Date.now() + reservationLifetimeMs(input.paymentMethod),
+              Date.now() +
+                (shippingQuote.status === ShippingQuoteStatus.PENDING
+                  ? SHIPPING_QUOTE_RESERVATION_MS
+                  : reservationLifetimeMs(input.paymentMethod)),
             );
             const currentExpiration =
               order.expiresAt ??
@@ -214,7 +251,7 @@ export class OrdersService {
                   orderId: order.id,
                   provider: paymentProvider,
                   method: input.paymentMethod,
-                  amountCents: order.totalCents,
+                  amountCents: totalCents,
                   currency: order.currency,
                   statusDetail: 'created_after_checkout_update',
                 },
@@ -225,8 +262,13 @@ export class OrdersService {
               where: { id: order.id },
               data: {
                 paymentMethod: input.paymentMethod,
-                deliveryMethod: input.deliveryMethod,
+                deliveryMethod: shippingQuote.deliveryMethod,
                 shippingAddress: shippingAddress ?? Prisma.JsonNull,
+                shippingQuoteStatus: shippingQuote.status,
+                shippingQuotedAt: shippingQuote.quotedAt,
+                shippingQuoteNotes: shippingQuote.notes,
+                shippingCents: shippingQuote.shippingCents,
+                totalCents,
                 customerNotes: input.customerNotes?.trim() || null,
                 paymentStatus: PaymentStatus.PENDING,
                 expiresAt,
@@ -239,6 +281,36 @@ export class OrdersService {
               },
               data: { expiresAt },
             });
+            if (shippingQuote.status === ShippingQuoteStatus.PENDING) {
+              const recipients = await transaction.user.findMany({
+                where: {
+                  isActive: true,
+                  role: { in: [UserRole.ADMIN, UserRole.STAFF] },
+                },
+                select: { id: true },
+              });
+              if (recipients.length) {
+                await transaction.adminNotification.createMany({
+                  data: recipients.map((recipient) => ({
+                    userId: recipient.id,
+                    type: AdminNotificationType.SHIPPING_QUOTE_REQUESTED,
+                    title: 'Envío pendiente de cotización',
+                    message: `${order.number} · ${order.customerName}`,
+                    orderId: order.id,
+                  })),
+                  skipDuplicates: true,
+                });
+              }
+            } else {
+              await transaction.adminNotification.updateMany({
+                where: {
+                  orderId: order.id,
+                  type: AdminNotificationType.SHIPPING_QUOTE_REQUESTED,
+                  readAt: null,
+                },
+                data: { readAt: new Date() },
+              });
+            }
             await transaction.outboxEvent.create({
               data: {
                 type: 'ORDER_CHECKOUT_UPDATED',
@@ -248,7 +320,8 @@ export class OrdersService {
                   orderId: order.id,
                   publicToken: order.publicToken,
                   paymentMethod: input.paymentMethod,
-                  deliveryMethod: input.deliveryMethod,
+                  deliveryMethod: shippingQuote.deliveryMethod,
+                  shippingQuoteStatus: shippingQuote.status,
                 },
               },
             });
@@ -586,7 +659,6 @@ export class OrdersService {
     idempotencyKey: string,
     customerId: string,
   ) {
-    this.validateDeliveryPaymentPair(input.paymentMethod, input.deliveryMethod);
     const existing = await transaction.order.findUnique({ where: { idempotencyKey } });
     if (existing) return existing.publicToken;
 
@@ -596,13 +668,6 @@ export class OrdersService {
     if (!customer?.email || !customer.firstName || !customer.phone) {
       throw new BadRequestException('Completa los datos de tu cuenta antes de comprar.');
     }
-    if (
-      this.config.get<string>('REQUIRE_EMAIL_VERIFICATION') === 'true' &&
-      !customer.emailVerifiedAt
-    ) {
-      throw new BadRequestException('Verifica tu correo antes de completar la compra.');
-    }
-
     const cart = await transaction.cart.findUnique({
       where: { publicToken: input.cartToken },
       include: {
@@ -754,10 +819,22 @@ export class OrdersService {
       customerId,
       input,
     );
+    const shippingQuote = resolveShippingQuote(
+      input.deliveryMethod,
+      shippingAddress as Record<string, unknown> | undefined,
+      now,
+    );
+    this.validateDeliveryPaymentPair(input.paymentMethod, shippingQuote.deliveryMethod);
     const customerName = [customer.firstName, customer.lastName].filter(Boolean).join(' ');
     const paymentProvider = this.resolvePaymentProvider(input);
 
-    const expiresAt = new Date(Date.now() + reservationLifetimeMs(input.paymentMethod));
+    const expiresAt = new Date(
+      Date.now() +
+        (shippingQuote.status === ShippingQuoteStatus.PENDING
+          ? SHIPPING_QUOTE_RESERVATION_MS
+          : reservationLifetimeMs(input.paymentMethod)),
+    );
+    const totalCents = subtotalCents - discountCents + shippingQuote.shippingCents;
     const order = await transaction.order.create({
       data: {
         number: this.createOrderNumber(),
@@ -767,12 +844,15 @@ export class OrdersService {
         customerEmail: customer.email,
         customerPhone: customer.phone,
         paymentMethod: input.paymentMethod,
-        deliveryMethod: input.deliveryMethod,
+        deliveryMethod: shippingQuote.deliveryMethod,
         shippingAddress,
+        shippingQuoteStatus: shippingQuote.status,
+        shippingQuotedAt: shippingQuote.quotedAt,
+        shippingQuoteNotes: shippingQuote.notes,
         subtotalCents,
         discountCents,
-        shippingCents: 0,
-        totalCents: subtotalCents - discountCents,
+        shippingCents: shippingQuote.shippingCents,
+        totalCents,
         customerNotes: input.customerNotes?.trim(),
         expiresAt,
       },
@@ -882,13 +962,26 @@ export class OrdersService {
     });
     if (notificationRecipients.length) {
       await transaction.adminNotification.createMany({
-        data: notificationRecipients.map((recipient) => ({
-          userId: recipient.id,
-          type: AdminNotificationType.ORDER_CREATED,
-          title: 'Nuevo pedido recibido',
-          message: `${order.number} · ${customerName} · ${(order.totalCents / 100).toLocaleString('es-MX', { style: 'currency', currency: order.currency })}`,
-          orderId: order.id,
-        })),
+        data: notificationRecipients.flatMap((recipient) => [
+          {
+            userId: recipient.id,
+            type: AdminNotificationType.ORDER_CREATED,
+            title: 'Nuevo pedido recibido',
+            message: `${order.number} · ${customerName} · ${(order.totalCents / 100).toLocaleString('es-MX', { style: 'currency', currency: order.currency })}`,
+            orderId: order.id,
+          },
+          ...(shippingQuote.status === ShippingQuoteStatus.PENDING
+            ? [
+                {
+                  userId: recipient.id,
+                  type: AdminNotificationType.SHIPPING_QUOTE_REQUESTED,
+                  title: 'Envío pendiente de cotización',
+                  message: `${order.number} · ${customerName}`,
+                  orderId: order.id,
+                },
+              ]
+            : []),
+        ]),
         skipDuplicates: true,
       });
     }
@@ -972,6 +1065,9 @@ export class OrdersService {
       subtotalCents: order.subtotalCents,
       discountCents: order.discountCents,
       shippingCents: order.shippingCents,
+      shippingQuoteStatus: order.shippingQuoteStatus,
+      shippingQuotedAt: order.shippingQuotedAt,
+      shippingQuoteNotes: order.shippingQuoteNotes,
       totalCents: order.totalCents,
       shippingAddress: order.shippingAddress,
       customerNotes: order.customerNotes,

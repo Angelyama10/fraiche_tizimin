@@ -388,7 +388,7 @@
 }
 
 .productGallery__main img {
-  object-fit: cover;
+  object-fit: contain;
 }
 
 .productGallery__mark {

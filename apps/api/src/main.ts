@@ -22,6 +22,8 @@ function validateProductionEnvironment() {
     'MERCADOPAGO_WEBHOOK_SECRET',
     'CORS_ORIGIN',
     'SMTP_HOST',
+    'SMTP_USER',
+    'SMTP_PASS',
     'SMTP_FROM',
     'ADMIN_NOTIFICATION_EMAIL',
     'STORAGE_ENDPOINT',

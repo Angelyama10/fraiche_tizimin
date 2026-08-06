@@ -492,44 +492,68 @@ export class AdminService {
   async updateInventory(variantId: string, input: UpdateInventoryDto, actorId: string) {
     return this.prisma.$transaction(
       async (transaction) => {
-        const location = await transaction.storeLocation.findFirst({
-          where: { isDefault: true, isActive: true },
-        });
+        const [location, variant] = await Promise.all([
+          transaction.storeLocation.findFirst({
+            where: { isDefault: true, isActive: true },
+          }),
+          transaction.productVariant.findUnique({
+            where: { id: variantId },
+            select: { id: true },
+          }),
+        ]);
         if (!location) throw new ConflictException('No existe una ubicacion activa.');
+        if (!variant) throw new NotFoundException('Variante no encontrada.');
+
         const inventory = await transaction.inventoryLevel.findUnique({
           where: { variantId_locationId: { variantId, locationId: location.id } },
         });
-        if (!inventory) throw new NotFoundException('Inventario no encontrado.');
-        if (input.onHand < inventory.reserved) {
+        const reserved = inventory?.reserved ?? 0;
+        if (input.onHand < reserved) {
           throw new ConflictException('La existencia no puede ser menor que las unidades reservadas.');
         }
 
-        const updated = await transaction.inventoryLevel.update({
-          where: { id: inventory.id },
-          data: {
-            onHand: input.onHand,
-            available: input.onHand - inventory.reserved,
-            lowStockThreshold: input.lowStockThreshold,
-            version: { increment: 1 },
-          },
-        });
-        await transaction.stockMovement.create({
-          data: {
-            variantId,
-            locationId: location.id,
-            type: StockMovementType.ADJUSTMENT,
-            quantity: input.onHand - inventory.onHand,
-            referenceId: inventory.id,
-            reason: input.reason ?? 'Ajuste administrativo',
-          },
-        });
+        const updated = inventory
+          ? await transaction.inventoryLevel.update({
+              where: { id: inventory.id },
+              data: {
+                onHand: input.onHand,
+                available: input.onHand - reserved,
+                lowStockThreshold: input.lowStockThreshold,
+                version: { increment: 1 },
+              },
+            })
+          : await transaction.inventoryLevel.create({
+              data: {
+                variantId,
+                locationId: location.id,
+                onHand: input.onHand,
+                available: input.onHand,
+                lowStockThreshold: input.lowStockThreshold ?? 3,
+              },
+            });
+
+        const quantity = input.onHand - (inventory?.onHand ?? 0);
+        if (quantity !== 0) {
+          await transaction.stockMovement.create({
+            data: {
+              variantId,
+              locationId: location.id,
+              type: StockMovementType.ADJUSTMENT,
+              quantity,
+              referenceId: updated.id,
+              reason: input.reason ?? 'Ajuste administrativo',
+            },
+          });
+        }
         await transaction.auditLog.create({
           data: {
             actorId,
-            action: 'INVENTORY_UPDATED',
+            action: inventory ? 'INVENTORY_UPDATED' : 'INVENTORY_CREATED',
             entityType: 'InventoryLevel',
-            entityId: inventory.id,
-            before: inventory as unknown as Prisma.InputJsonValue,
+            entityId: updated.id,
+            ...(inventory
+              ? { before: inventory as unknown as Prisma.InputJsonValue }
+              : {}),
             after: updated as unknown as Prisma.InputJsonValue,
           },
         });

@@ -61,11 +61,12 @@ import type {
 } from '@/lib/types';
 import { BrandIdentity } from '@/components/site/brand-identity';
 import { AdminNotificationCenter } from './admin-notification-center';
+import { AdminPriceManager } from './admin-price-manager';
 import { AdminSiteEditor } from './admin-site-editor';
 
 type AdminUser = { id: string; email: string; name: string; role: string };
 type AdminSession = { accessToken: string; expiresInSeconds: number; user: AdminUser };
-type Tab = 'dashboard' | 'products' | 'inventory' | 'orders' | 'promotions' | 'content';
+type Tab = 'dashboard' | 'products' | 'prices' | 'inventory' | 'orders' | 'promotions' | 'content';
 export type AdminRequest = <T>(path: string, init?: RequestInit) => Promise<T>;
 
 type Dashboard = {
@@ -86,7 +87,21 @@ type AdminProduct = {
   images: ProductImage[];
   categories: Array<{ category: Category }>;
   catalogLines: Array<{ catalogLine: CatalogLine }>;
-  variants: Array<{ id: string; sku: string; name: string; catalogPriceCents: number | null; isActive: boolean; inventoryLevels: Array<{ onHand: number; available: number; reserved: number }> }>;
+  variants: Array<{
+    id: string;
+    sku: string;
+    name: string;
+    catalogPriceCents: number | null;
+    isActive: boolean;
+    inventoryLevels: Array<{
+      id: string;
+      onHand: number;
+      available: number;
+      reserved: number;
+      lowStockThreshold: number;
+      location?: { id: string; name: string; isDefault?: boolean };
+    }>;
+  }>;
   updatedAt: string;
 };
 
@@ -104,8 +119,11 @@ type InventoryItem = {
 
 type AdminOrder = {
   publicToken: string; number: string; customerName: string; customerEmail?: string; customerPhone?: string;
-  status: string; paymentStatus: string; fulfillmentStatus: string; totalCents: number; currency: string;
+  status: string; paymentStatus: string; fulfillmentStatus: string; subtotalCents: number; discountCents: number;
+  shippingCents: number; totalCents: number; currency: string;
   paymentMethod: string; deliveryMethod: string; shippingAddress?: Record<string, string | null> | null;
+  shippingQuoteStatus: 'NOT_REQUIRED' | 'PENDING' | 'QUOTED';
+  shippingQuotedAt?: string | null; shippingQuoteNotes?: string | null;
   customerNotes?: string | null; createdAt: string;
   _count?: { items: number; shipments: number };
   shipments?: Array<{ id: string; carrier: string; trackingNumber: string; status: string }>;
@@ -133,6 +151,7 @@ type AdminPromotion = {
 const nav: Array<{ id: Tab; label: string; icon: typeof BarChart3 }> = [
   { id: 'dashboard', label: 'Resumen', icon: BarChart3 },
   { id: 'products', label: 'Productos', icon: ShoppingBag },
+  { id: 'prices', label: 'Precios', icon: CircleDollarSign },
   { id: 'inventory', label: 'Inventario', icon: Boxes },
   { id: 'orders', label: 'Pedidos', icon: Package },
   { id: 'promotions', label: 'Promociones', icon: BadgePercent },
@@ -187,7 +206,7 @@ function AdminWorkspace({ session, onLogout }: { session: AdminSession; onLogout
     FALLBACK_CATALOG_NAVIGATION,
   );
   const [perfumeHouses, setPerfumeHouses] = useState<PerfumeHouse[]>([]);
-  const [modal, setModal] = useState<'product' | 'product-edit' | 'product-images' | 'inventory' | 'promotion' | 'promotion-edit' | 'shipment' | 'delivery' | 'price' | null>(null);
+  const [modal, setModal] = useState<'product' | 'product-edit' | 'product-images' | 'inventory' | 'promotion' | 'promotion-edit' | 'shipment' | 'shipping-quote' | 'delivery' | 'price' | null>(null);
   const [selected, setSelected] = useState<InventoryItem | AdminOrder | AdminProduct | AdminPromotion | null>(null);
   const [notice, setNotice] = useState<{ tone: 'success' | 'error'; message: string } | null>(null);
 
@@ -235,13 +254,16 @@ function AdminWorkspace({ session, onLogout }: { session: AdminSession; onLogout
   function actionSuccess(message: string) { setNotice({ tone: 'success', message }); setModal(null); setSelected(null); setRefreshKey((value) => value + 1); }
   function open(nextModal: typeof modal, item?: typeof selected) { setSelected(item ?? null); setModal(nextModal); }
 
-  const tabLabel = nav.find((item) => item.id === tab)?.label;
+  const visibleNav = session.user.role === 'ADMIN'
+    ? nav
+    : nav.filter((item) => item.id !== 'prices');
+  const tabLabel = visibleNav.find((item) => item.id === tab)?.label;
 
   return (
     <main className="adminShell">
       <aside className={`adminSidebar ${menuOpen ? 'isOpen' : ''}`}>
         <div className="adminSidebar__brand"><BrandIdentity compact inverted /><button aria-label="Cerrar menú" onClick={() => setMenuOpen(false)} type="button"><X size={18} /></button></div>
-        <nav>{nav.map((item) => <button className={tab === item.id ? 'isActive' : ''} key={item.id} onClick={() => { setTab(item.id); setMenuOpen(false); }} type="button"><item.icon size={18} /><span>{item.label}</span><ChevronRight size={14} /></button>)}</nav>
+        <nav>{visibleNav.map((item) => <button className={tab === item.id ? 'isActive' : ''} key={item.id} onClick={() => { setTab(item.id); setMenuOpen(false); }} type="button"><item.icon size={18} /><span>{item.label}</span><ChevronRight size={14} /></button>)}</nav>
         <div className="adminSidebar__user"><span>{initials(session.user.name.split(' ')[0], session.user.name.split(' ')[1])}</span><div><strong>{session.user.name}</strong><small>{session.user.role}</small></div><button aria-label="Cerrar sesión" onClick={onLogout} title="Cerrar sesión" type="button"><LogOut size={16} /></button></div>
       </aside>
       {menuOpen && <button aria-label="Cerrar menú" className="adminBackdrop" onClick={() => setMenuOpen(false)} type="button" />}
@@ -264,8 +286,21 @@ function AdminWorkspace({ session, onLogout }: { session: AdminSession; onLogout
           {loading ? <AdminLoading /> : <>
             {tab === 'dashboard' && <DashboardTab dashboard={dashboard} onTab={setTab} />}
             {tab === 'products' && <ProductsTab refreshKey={refreshKey} onCreate={() => open('product')} onEdit={(product) => open('product-edit', product)} onEditImages={(product) => open('product-images', product)} onEditPrice={(product) => open('price', product)} request={request} onSuccess={actionSuccess} />}
+            {tab === 'prices' && session.user.role === 'ADMIN' && <>
+              <AdminHeading
+                eyebrow="Catálogo"
+                title="Actualización masiva"
+                description="Ajusta precios por porcentaje con una vista previa verificable antes de publicar el cambio."
+              />
+              <AdminPriceManager
+                brands={brands}
+                categories={categories}
+                onSuccess={actionSuccess}
+                request={request}
+              />
+            </>}
             {tab === 'inventory' && <InventoryTab inventory={inventory} onAdjust={(item) => open('inventory', item)} />}
-            {tab === 'orders' && <OrdersTab orders={orders} onDelivery={(order) => open('delivery', order)} onShipment={(order) => open('shipment', order)} request={request} onSuccess={actionSuccess} />}
+            {tab === 'orders' && <OrdersTab orders={orders} onDelivery={(order) => open('delivery', order)} onQuote={(order) => open('shipping-quote', order)} onShipment={(order) => open('shipment', order)} request={request} onSuccess={actionSuccess} />}
             {tab === 'promotions' && <PromotionsTab promotions={promotions} onCreate={() => open('promotion')} onEdit={(promotion) => open('promotion-edit', promotion)} request={request} onSuccess={actionSuccess} />}
             {tab === 'content' && <AdminSiteEditor onNotice={(tone, message) => setNotice({ tone, message })} request={request} />}
           </>}
@@ -279,6 +314,7 @@ function AdminWorkspace({ session, onLogout }: { session: AdminSession; onLogout
         {modal === 'price' && selected && <PriceForm product={selected as AdminProduct} request={request} onSuccess={actionSuccess} />}
         {modal === 'promotion' && <PromotionForm request={request} onSuccess={actionSuccess} />}
         {modal === 'promotion-edit' && selected && <PromotionForm promotion={selected as AdminPromotion} request={request} onSuccess={actionSuccess} />}
+        {modal === 'shipping-quote' && selected && <ShippingQuoteForm order={selected as AdminOrder} request={request} onSuccess={actionSuccess} />}
         {modal === 'shipment' && selected && <ShipmentForm order={selected as AdminOrder} request={request} onSuccess={actionSuccess} />}
         {modal === 'delivery' && selected && <DeliveryDetails order={selected as AdminOrder} />}
       </AdminModal>}
@@ -406,7 +442,7 @@ function InventoryTab({ inventory, onAdjust }: { inventory: InventoryItem[]; onA
   return <><AdminHeading eyebrow="Control de stock" title="Inventario" description={`${inventory.reduce((sum, item) => sum + item.available, 0)} unidades disponibles`} action={<button className={`adminFilterToggle ${onlyLow ? 'isActive' : ''}`} onClick={() => setOnlyLow(!onlyLow)} type="button"><AlertTriangle size={15} /> Poco stock</button>} /><AdminSearch value={query} onChange={setQuery} placeholder="Buscar producto o SKU" /><div className="adminTableWrap"><table className="adminTable"><thead><tr><th>Producto</th><th>Ubicación</th><th>Disponible</th><th>Reservado</th><th>Total</th><th>Alerta</th><th /></tr></thead><tbody>{visible.map((item) => <tr key={item.id}><td><div className="tablePrimary"><span><Boxes size={16} /></span><div><strong>{item.variant.product.name}</strong><small>{item.variant.sku}</small></div></div></td><td>{item.location.name}</td><td><strong className={item.available <= item.lowStockThreshold ? 'stockLow' : ''}>{item.available}</strong></td><td>{item.reserved}</td><td>{item.onHand}</td><td>{item.available <= item.lowStockThreshold ? <span className="adminStatus adminStatus--danger">Reponer</span> : <span className="adminStatus adminStatus--success">Bien</span>}</td><td><button className="adminSecondaryButton" onClick={() => onAdjust(item)} type="button">Ajustar</button></td></tr>)}</tbody></table></div></>;
 }
 
-function OrdersTab({ orders, onDelivery, onShipment, request, onSuccess }: { orders: AdminOrder[]; onDelivery: (order: AdminOrder) => void; onShipment: (order: AdminOrder) => void; request: AdminRequest; onSuccess: (message: string) => void }) {
+function OrdersTab({ orders, onDelivery, onQuote, onShipment, request, onSuccess }: { orders: AdminOrder[]; onDelivery: (order: AdminOrder) => void; onQuote: (order: AdminOrder) => void; onShipment: (order: AdminOrder) => void; request: AdminRequest; onSuccess: (message: string) => void }) {
   const [query, setQuery] = useState('');
   const visible = orders.filter((order) =>
     `${order.number} ${order.customerName} ${order.customerEmail}`
@@ -517,8 +553,13 @@ function OrdersTab({ orders, onDelivery, onShipment, request, onSuccess }: { ord
                 !isTerminal &&
                 order.payments?.[0]?.method === 'CASH' &&
                 ['PENDING', 'IN_PROCESS'].includes(order.paymentStatus);
+              const canQuoteShipping =
+                !isTerminal &&
+                order.deliveryMethod === 'SHIPPING' &&
+                ['PENDING', 'QUOTED'].includes(order.shippingQuoteStatus);
               const canCreateShipment =
                 order.deliveryMethod !== 'STORE_PICKUP' &&
+                order.shippingQuoteStatus !== 'PENDING' &&
                 order.paymentStatus === 'APPROVED' &&
                 ['CONFIRMED', 'PROCESSING', 'READY'].includes(order.status);
 
@@ -560,6 +601,7 @@ function OrdersTab({ orders, onDelivery, onShipment, request, onSuccess }: { ord
                   </td>
                   <td>
                     <strong>{formatMoney(order.totalCents, order.currency)}</strong>
+                    {order.shippingQuoteStatus === 'PENDING' && <small className="adminTableHint">Envío por cotizar</small>}
                   </td>
                   <td>
                     <div className="tableActions">
@@ -570,6 +612,15 @@ function OrdersTab({ orders, onDelivery, onShipment, request, onSuccess }: { ord
                       >
                         <MapPin size={14} /> Entrega
                       </button>
+                      {canQuoteShipping && (
+                        <button
+                          className="adminSecondaryButton"
+                          onClick={() => onQuote(order)}
+                          type="button"
+                        >
+                          <Truck size={14} /> {order.shippingQuoteStatus === 'PENDING' ? 'Cotizar envío' : 'Editar envío'}
+                        </button>
+                      )}
                       {proof && (
                         <>
                           <button
@@ -1236,6 +1287,11 @@ function ProductEditForm({
   const choices = categoryChoices(categories);
   const selectedCategories = new Set(product.categories.map((item) => item.category.slug));
 
+  function inventoryForVariant(variant: AdminProduct['variants'][number]) {
+    return variant.inventoryLevels.find((level) => level.location?.isDefault)
+      ?? variant.inventoryLevels[0];
+  }
+
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
@@ -1265,7 +1321,37 @@ function ProductEditForm({
           images: productImagesPayload(images),
         }),
       });
-      onSuccess('Producto, categorías e imágenes actualizados.');
+
+      const inventoryUpdates = product.variants.flatMap((variant) => {
+        const inventory = inventoryForVariant(variant);
+        const onHand = Number(form.get(`stock-${variant.id}`));
+        const lowStockThreshold = Number(form.get(`threshold-${variant.id}`));
+        if (
+          inventory
+          &&
+          onHand === inventory.onHand
+          && lowStockThreshold === inventory.lowStockThreshold
+        ) {
+          return [];
+        }
+
+        return [request(`/admin/inventory/${variant.id}`, {
+          method: 'PATCH',
+          body: JSON.stringify({
+            onHand,
+            lowStockThreshold,
+            reason: String(form.get('inventoryReason') || '').trim()
+              || 'Ajuste desde la edición del producto',
+          }),
+        })];
+      });
+
+      await Promise.all(inventoryUpdates);
+      onSuccess(
+        inventoryUpdates.length
+          ? 'Producto e inventario actualizados.'
+          : 'Producto, categorías e imágenes actualizados.',
+      );
     } catch (error) {
       window.alert(errorMessage(error));
     } finally {
@@ -1292,6 +1378,41 @@ function ProductEditForm({
       {choices.map(({ category, parent }) => <label key={category.id}><input defaultChecked={selectedCategories.has(category.slug)} name="categorySlugs" type="checkbox" value={category.slug} /><span><Check size={11} /></span>{parent ? `${parent.name} · ${category.name}` : category.name}</label>)}
     </fieldset>
     <CatalogLineSelector navigation={navigation} onChange={setCatalogLineSlugs} selectedSlugs={catalogLineSlugs} />
+    <div className="adminFormDivider"><span>Inventario por variante</span></div>
+    <section className="adminVariantStock" aria-label="Inventario por variante">
+      {product.variants.map((variant) => {
+        const inventory = inventoryForVariant(variant);
+        const onHand = inventory?.onHand ?? 0;
+        const reserved = inventory?.reserved ?? 0;
+        const available = inventory?.available ?? 0;
+        const lowStockThreshold = inventory?.lowStockThreshold ?? 3;
+
+        return <article className="adminVariantStock__item" key={variant.id}>
+          <div className="adminVariantStock__heading">
+            <div><strong>{variant.name}</strong><small>{variant.sku} · {inventory?.location?.name ?? 'Tienda principal'}</small></div>
+            {inventory
+              ? <span className={available <= lowStockThreshold ? 'stockLow' : ''}>{available} disponibles</span>
+              : <span className="adminStatus adminStatus--warning">Se creará al guardar</span>}
+          </div>
+          <div className="adminFormGrid adminVariantStock__fields">
+            <AdminField label="Existencia total" description={`${reserved} unidades están reservadas y no pueden descontarse.`}>
+              <input defaultValue={onHand} min={reserved} name={`stock-${variant.id}`} required type="number" />
+            </AdminField>
+            <AdminField label="Avisar cuando queden" description="Cantidad que activa la alerta de poco stock.">
+              <input defaultValue={lowStockThreshold} min="0" name={`threshold-${variant.id}`} required type="number" />
+            </AdminField>
+          </div>
+          <div className="adminVariantStock__summary">
+            <span><strong>{onHand}</strong> totales</span>
+            <span><strong>{reserved}</strong> reservadas</span>
+            <span><strong>{available}</strong> disponibles ahora</span>
+          </div>
+        </article>;
+      })}
+      <AdminField label="Motivo del ajuste (opcional)" description="Se guardará en el historial cuando cambies alguna existencia.">
+        <textarea maxLength={300} name="inventoryReason" placeholder="Recepción de mercancía, conteo físico, merma..." rows={2} />
+      </AdminField>
+    </section>
     <ProductImageManager images={images} onChange={setImages} productName={productName} request={request} />
     <div className="adminFormChecks"><label><input defaultChecked={product.isFeatured} name="isFeatured" type="checkbox" /> Destacado</label><label><input defaultChecked={product.isNew} name="isNew" type="checkbox" /> Novedad</label></div>
     <button className="adminPrimaryButton adminPrimaryButton--wide" disabled={saving || !catalogLineSlugs.length} type="submit">{saving ? <span className="buttonSpinner" /> : <><Check size={16} /> Guardar producto</>}</button>
@@ -1468,9 +1589,57 @@ function DeliverySummary({ order }: { order: AdminOrder }) {
         {address.reference && <div className="adminDeliverySummary__wide"><dt>Referencias</dt><dd>{String(address.reference)}</dd></div>}
       </>}
       {order.customerNotes && <div className="adminDeliverySummary__wide"><dt>Nota del cliente</dt><dd>{order.customerNotes}</dd></div>}
+      <div><dt>Subtotal</dt><dd>{formatMoney(order.subtotalCents, order.currency)}</dd></div>
+      {order.discountCents > 0 && <div><dt>Descuento</dt><dd>− {formatMoney(order.discountCents, order.currency)}</dd></div>}
+      <div><dt>Envío</dt><dd>{order.shippingQuoteStatus === 'PENDING' ? 'Pendiente de cotización' : formatMoney(order.shippingCents, order.currency)}</dd></div>
+      <div><dt>Total</dt><dd><strong>{formatMoney(order.totalCents, order.currency)}</strong></dd></div>
+      {order.shippingQuoteNotes && <div className="adminDeliverySummary__wide"><dt>Nota de cotización</dt><dd>{order.shippingQuoteNotes}</dd></div>}
     </dl>
     {order.deliveryMethod !== 'STORE_PICKUP' && !address && <p className="adminDeliverySummary__warning"><AlertTriangle size={15} /> Este pedido no tiene una dirección guardada. Revísalo antes de preparar el envío.</p>}
   </section>;
+}
+
+function ShippingQuoteForm({ order, request, onSuccess }: { order: AdminOrder; request: AdminRequest; onSuccess: (message: string) => void }) {
+  const [saving, setSaving] = useState(false);
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    const amount = Number(form.get('shippingAmount'));
+    if (!Number.isFinite(amount) || amount <= 0) {
+      window.alert('Ingresa un costo de envío mayor a $0.');
+      return;
+    }
+
+    setSaving(true);
+    try {
+      await request(`/admin/orders/${order.publicToken}/shipping-quote`, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          shippingCents: Math.round(amount * 100),
+          notes: String(form.get('notes') ?? '').trim() || undefined,
+        }),
+      });
+      onSuccess('Cotización guardada. El cliente ya puede revisar el total y pagar.');
+    } catch (error) {
+      window.alert(errorMessage(error));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return <form className="adminForm" onSubmit={submit}>
+    <div className="adminFormContext"><Truck size={19} /><div><strong>{order.number}</strong><small>{order.customerName} · envío nacional</small></div></div>
+    <DeliverySummary order={order} />
+    <div className="adminFormDivider"><span>Cotización para el cliente</span></div>
+    <AdminField label="Costo de envío MXN" description="Este importe se sumará al total antes de habilitar el pago.">
+      <input defaultValue={order.shippingCents > 0 ? order.shippingCents / 100 : ''} min="0.01" name="shippingAmount" required step="0.01" type="number" />
+    </AdminField>
+    <AdminField label="Nota opcional" description="Ejemplo: Estafeta terrestre, entrega estimada de 3 a 5 días.">
+      <textarea defaultValue={order.shippingQuoteNotes ?? ''} maxLength={500} name="notes" rows={3} />
+    </AdminField>
+    <button className="adminPrimaryButton adminPrimaryButton--wide" disabled={saving} type="submit">{saving ? <span className="buttonSpinner" /> : <><Check size={15} /> Guardar cotización</>}</button>
+  </form>;
 }
 
 function DeliveryDetails({ order }: { order: AdminOrder }) {
@@ -1525,4 +1694,4 @@ function AdminSearch({ value, onChange, placeholder }: { value: string; onChange
 function AdminField({ label, description, children }: { label: string; description?: string; children: React.ReactNode }) { return <label className="adminField"><span>{label}</span>{description && <small>{description}</small>}{children}</label>; }
 function Metric({ icon: Icon, label, value, note, tone }: { icon: typeof BarChart3; label: string; value: string; note: string; tone: string }) { return <article className={`adminMetric adminMetric--${tone}`}><span><Icon size={19} /></span><small>{label}</small><strong>{value}</strong><p>{note}</p></article>; }
 function AdminLoading() { return <div className="adminLoading"><span /><div>{Array.from({ length: 4 }, (_, index) => <i key={index} />)}</div><b /></div>; }
-function modalTitle(modal: string) { return ({ product: 'Nuevo producto', 'product-edit': 'Editar producto', 'product-images': 'Fotografías del producto', inventory: 'Ajustar inventario', promotion: 'Nueva promoción', 'promotion-edit': 'Editar promoción', shipment: 'Registrar guía', delivery: 'Datos de entrega', price: 'Actualizar precio' } as Record<string, string>)[modal] ?? 'Administrar'; }
+function modalTitle(modal: string) { return ({ product: 'Nuevo producto', 'product-edit': 'Editar producto', 'product-images': 'Fotografías del producto', inventory: 'Ajustar inventario', promotion: 'Nueva promoción', 'promotion-edit': 'Editar promoción', 'shipping-quote': 'Cotizar envío', shipment: 'Registrar guía', delivery: 'Datos de entrega', price: 'Actualizar precio' } as Record<string, string>)[modal] ?? 'Administrar'; }

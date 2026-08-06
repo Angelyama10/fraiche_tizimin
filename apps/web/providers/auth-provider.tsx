@@ -20,6 +20,8 @@ type RegisterInput = LoginInput & {
   marketingOptIn: boolean;
 };
 
+type AnonymousRefreshResponse = { authenticated: false };
+
 type AuthContextValue = {
   customer: CustomerSummary | null;
   status: 'loading' | 'anonymous' | 'authenticated';
@@ -38,6 +40,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [customer, setCustomer] = useState<CustomerSummary | null>(null);
   const [status, setStatus] = useState<AuthContextValue['status']>('loading');
   const tokenRef = useRef<string | null>(null);
+  const refreshPromiseRef = useRef<Promise<string | null> | null>(null);
 
   const persistSession = useCallback((response: AuthResponse) => {
     tokenRef.current = response.accessToken;
@@ -56,17 +59,34 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     sessionStorage.removeItem(CUSTOMER_KEY);
   }, []);
 
-  const refreshSession = useCallback(async () => {
-    try {
-      const response = await apiRequest<AuthResponse>('/customer-auth/refresh', {
-        method: 'POST',
-        cache: 'no-store',
-      });
-      return persistSession(response);
-    } catch {
-      clearSession();
-      return null;
-    }
+  const refreshSession = useCallback(() => {
+    if (refreshPromiseRef.current) return refreshPromiseRef.current;
+
+    const operation = (async () => {
+      try {
+        const response = await apiRequest<AuthResponse | AnonymousRefreshResponse>(
+          '/customer-auth/refresh',
+          {
+            method: 'POST',
+            cache: 'no-store',
+          },
+        );
+        if (!('accessToken' in response)) {
+          clearSession();
+          return null;
+        }
+        return persistSession(response);
+      } catch {
+        clearSession();
+        return null;
+      }
+    })();
+
+    refreshPromiseRef.current = operation;
+    void operation.finally(() => {
+      if (refreshPromiseRef.current === operation) refreshPromiseRef.current = null;
+    });
+    return operation;
   }, [clearSession, persistSession]);
 
   useEffect(() => {
@@ -77,6 +97,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         tokenRef.current = savedToken;
         setCustomer(JSON.parse(savedCustomer) as CustomerSummary);
         setStatus('authenticated');
+        void refreshSession();
         return;
       } catch {
         sessionStorage.removeItem(CUSTOMER_KEY);

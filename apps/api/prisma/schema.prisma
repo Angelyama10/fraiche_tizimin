@@ -124,6 +124,12 @@ enum DeliveryMethod {
   SHIPPING
 }
 
+enum ShippingQuoteStatus {
+  NOT_REQUIRED
+  PENDING
+  QUOTED
+}
+
 enum ReservationStatus {
   ACTIVE
   CONSUMED
@@ -169,6 +175,7 @@ enum OutboxStatus {
 
 enum AdminNotificationType {
   ORDER_CREATED
+  SHIPPING_QUOTE_REQUESTED
 }
 
 enum MediaAssetStatus {
@@ -617,6 +624,9 @@ model Order {
   paymentMethod      PaymentMethod
   deliveryMethod     DeliveryMethod
   shippingAddress    Json?
+  shippingQuoteStatus ShippingQuoteStatus @default(NOT_REQUIRED)
+  shippingQuotedAt   DateTime?
+  shippingQuoteNotes String?
   currency           String              @default("MXN")
   subtotalCents      Int
   discountCents      Int                 @default(0)

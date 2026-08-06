@@ -21,8 +21,11 @@ import {
   ListAdminNotificationsDto,
   ListAdminOrdersDto,
   ListAdminProductsDto,
+  ListPriceAdjustmentsDto,
   ListPromotionsDto,
   PaginationDto,
+  PercentagePriceAdjustmentDto,
+  SetShippingQuoteDto,
   UpdateOrderStatusDto,
   UpdatePricingPolicyDto,
   UpdatePromotionDto,
@@ -265,6 +268,15 @@ export class AdminController {
     return this.commerce.getOrder(publicToken);
   }
 
+  @Patch('orders/:publicToken/shipping-quote')
+  setShippingQuote(
+    @Param('publicToken') publicToken: string,
+    @Body() input: SetShippingQuoteDto,
+    @Req() request: AuthenticatedRequest,
+  ) {
+    return this.commerce.setShippingQuote(publicToken, input, request.user.userId);
+  }
+
   @Patch('orders/:publicToken/status')
   updateOrderStatus(
     @Param('publicToken') publicToken: string,
@@ -330,6 +342,27 @@ export class AdminController {
     @Req() request: AuthenticatedRequest,
   ) {
     return this.commerce.bulkUpdatePrices(input, request.user.userId);
+  }
+
+  @Roles(UserRole.ADMIN)
+  @Post('prices/percentage/preview')
+  previewPercentagePriceAdjustment(@Body() input: PercentagePriceAdjustmentDto) {
+    return this.commerce.previewPercentagePriceAdjustment(input);
+  }
+
+  @Roles(UserRole.ADMIN)
+  @Post('prices/percentage/apply')
+  applyPercentagePriceAdjustment(
+    @Body() input: PercentagePriceAdjustmentDto,
+    @Req() request: AuthenticatedRequest,
+  ) {
+    return this.commerce.applyPercentagePriceAdjustment(input, request.user.userId);
+  }
+
+  @Roles(UserRole.ADMIN)
+  @Get('prices/adjustments')
+  listPriceAdjustments(@Query() query: ListPriceAdjustmentsDto) {
+    return this.commerce.listPriceAdjustments(query);
   }
 
   @Get('inventory-alerts')

@@ -7,6 +7,7 @@ import {
   IsEnum,
   IsInt,
   IsNotEmpty,
+  IsNumber,
   IsOptional,
   IsString,
   IsUrl,
@@ -28,6 +29,11 @@ import {
   ShipmentStatus,
 } from '@prisma/client';
 import { PartialType } from '@nestjs/swagger';
+import {
+  PriceAdjustmentDirection,
+  PriceAdjustmentScope,
+  PriceRoundingMode,
+} from './price-adjustment';
 
 export class PaginationDto {
   @IsOptional()
@@ -110,6 +116,19 @@ export class UpdateOrderStatusDto {
   @IsString()
   @MaxLength(1000)
   internalNotes?: string;
+}
+
+export class SetShippingQuoteDto {
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(1_000_000)
+  shippingCents!: number;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  notes?: string;
 }
 
 export class CreateShipmentDto {
@@ -355,3 +374,56 @@ export class BulkUpdatePricesDto {
   @Type(() => VariantPriceUpdateDto)
   updates!: VariantPriceUpdateDto[];
 }
+
+export class PercentagePriceAdjustmentDto {
+  @IsEnum(PriceAdjustmentDirection)
+  direction!: PriceAdjustmentDirection;
+
+  @Type(() => Number)
+  @IsNumber({ maxDecimalPlaces: 2 })
+  @Min(0.01)
+  @Max(500)
+  percentage!: number;
+
+  @IsEnum(PriceAdjustmentScope)
+  scope!: PriceAdjustmentScope;
+
+  @IsOptional()
+  @IsEnum(ProductLine)
+  line?: ProductLine;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(80)
+  brandId?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(80)
+  categoryId?: string;
+
+  @IsOptional()
+  @Transform(({ value }) => (value === 'true' ? true : value === 'false' ? false : value))
+  @IsBoolean()
+  includeDrafts?: boolean;
+
+  @IsOptional()
+  @Transform(({ value }) => (value === 'true' ? true : value === 'false' ? false : value))
+  @IsBoolean()
+  includeFixedPolicies?: boolean;
+
+  @IsEnum(PriceRoundingMode)
+  rounding!: PriceRoundingMode;
+
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(240)
+  reason!: string;
+
+  @IsOptional()
+  @Transform(({ value }) => (value === 'true' ? true : value === 'false' ? false : value))
+  @IsBoolean()
+  confirmed?: boolean;
+}
+
+export class ListPriceAdjustmentsDto extends PaginationDto {}

@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { Interval } from '@nestjs/schedule';
@@ -16,11 +16,15 @@ type ClaimedEvent = {
   attempts: number;
 };
 
+const SMTP_DAILY_LIMIT_COOLDOWN_MS = 24 * 60 * 60 * 1000;
+
 @Injectable()
-export class OutboxService {
+export class OutboxService implements OnModuleInit {
   private readonly logger = new Logger(OutboxService.name);
   private running = false;
   private transporter?: Transporter;
+  private configurationWarningLogged = false;
+  private smtpPausedUntil?: Date;
 
   constructor(
     private readonly prisma: PrismaService,
@@ -28,14 +32,42 @@ export class OutboxService {
     private readonly jwt: JwtService,
   ) {}
 
+  async onModuleInit() {
+    if (!this.isConfigured()) {
+      this.logConfigurationWarning();
+      return;
+    }
+
+    try {
+      await this.getTransporter().verify();
+      this.logger.log('Conexion SMTP verificada correctamente.');
+    } catch (error) {
+      this.logger.error(
+        `No se pudo verificar SMTP al iniciar: ${
+          error instanceof Error ? error.message : 'error desconocido'
+        }`,
+      );
+    }
+  }
+
   @Interval(5000)
   async process() {
-    if (this.running || !this.isConfigured()) return;
+    if (this.running) return;
+    if (this.isSmtpPaused()) return;
+    if (!this.isConfigured()) {
+      this.logConfigurationWarning();
+      return;
+    }
     this.running = true;
 
     try {
       const events = await this.claimEvents();
       for (const event of events) {
+        if (this.isSmtpPaused()) {
+          await this.deferClaimedEvent(event);
+          continue;
+        }
+
         try {
           await this.sendNotification(event);
           await this.prisma.outboxEvent.update({
@@ -43,6 +75,24 @@ export class OutboxService {
             data: { status: OutboxStatus.SENT, processedAt: new Date(), lastError: null },
           });
         } catch (error) {
+          if (this.isDailySendingLimitError(error)) {
+            const availableAt = new Date(Date.now() + SMTP_DAILY_LIMIT_COOLDOWN_MS);
+            this.smtpPausedUntil = availableAt;
+            await this.prisma.outboxEvent.update({
+              where: { id: event.id },
+              data: {
+                status: OutboxStatus.PENDING,
+                attempts: { decrement: 1 },
+                availableAt,
+                lastError: this.errorMessage(error),
+              },
+            });
+            this.logger.warn(
+              `Gmail alcanzo su limite diario. Notificaciones pausadas hasta ${availableAt.toISOString()}.`,
+            );
+            continue;
+          }
+
           const exhausted = event.attempts >= 10;
           const delaySeconds = Math.min(3600, 30 * 2 ** Math.min(event.attempts, 7));
           await this.prisma.outboxEvent.update({
@@ -50,7 +100,7 @@ export class OutboxService {
             data: {
               status: exhausted ? OutboxStatus.FAILED : OutboxStatus.PENDING,
               availableAt: new Date(Date.now() + delaySeconds * 1000),
-              lastError: error instanceof Error ? error.message.slice(0, 1000) : 'Unknown error',
+              lastError: this.errorMessage(error),
             },
           });
           this.logger.error(
@@ -61,6 +111,36 @@ export class OutboxService {
     } finally {
       this.running = false;
     }
+  }
+
+  private isSmtpPaused() {
+    if (!this.smtpPausedUntil) return false;
+    if (this.smtpPausedUntil.getTime() > Date.now()) return true;
+    this.smtpPausedUntil = undefined;
+    return false;
+  }
+
+  private async deferClaimedEvent(event: ClaimedEvent) {
+    await this.prisma.outboxEvent.update({
+      where: { id: event.id },
+      data: {
+        status: OutboxStatus.PENDING,
+        attempts: { decrement: 1 },
+        availableAt: this.smtpPausedUntil ?? new Date(),
+      },
+    });
+  }
+
+  private isDailySendingLimitError(error: unknown) {
+    const message = error instanceof Error ? error.message : String(error);
+    return (
+      /550(?:-| )5\.4\.5/i.test(message) ||
+      /daily (?:user )?sending limit exceeded/i.test(message)
+    );
+  }
+
+  private errorMessage(error: unknown) {
+    return (error instanceof Error ? error.message : String(error)).slice(0, 1000);
   }
 
   private claimEvents() {
@@ -89,7 +169,7 @@ export class OutboxService {
   private async sendNotification(event: ClaimedEvent) {
     const message = await this.buildMessage(event);
     await this.getTransporter().sendMail({
-      from: this.config.getOrThrow<string>('SMTP_FROM'),
+      from: this.smtpValue('SMTP_FROM'),
       to: message.to,
       subject: message.subject,
       text: message.text,
@@ -290,22 +370,47 @@ export class OutboxService {
 
   private getTransporter() {
     if (!this.transporter) {
-      const user = this.config.get<string>('SMTP_USER');
-      const pass = this.config.get<string>('SMTP_PASS');
+      const user = this.smtpValue('SMTP_USER');
+      const pass = this.smtpPassword();
+      const port = Number(this.smtpValue('SMTP_PORT') || 587);
       this.transporter = nodemailer.createTransport({
-        host: this.config.getOrThrow<string>('SMTP_HOST'),
-        port: Number(this.config.get<string>('SMTP_PORT') ?? 587),
-        secure: Number(this.config.get<string>('SMTP_PORT') ?? 587) === 465,
-        ...(user && pass ? { auth: { user, pass } } : {}),
+        host: this.smtpValue('SMTP_HOST'),
+        port,
+        secure: port === 465,
+        auth: { user, pass },
       });
     }
     return this.transporter;
   }
 
   private isConfigured() {
-    return Boolean(
-      this.config.get<string>('SMTP_HOST') &&
-        this.config.get<string>('SMTP_FROM'),
+    return (
+      ['SMTP_HOST', 'SMTP_FROM', 'SMTP_USER'].every((key) =>
+        Boolean(this.smtpValue(key)),
+      ) && Boolean(this.smtpPassword())
+    );
+  }
+
+  private smtpValue(key: string) {
+    return this.config.get<string>(key)?.trim() ?? '';
+  }
+
+  private smtpPassword() {
+    const password = this.smtpValue('SMTP_PASS');
+    return this.smtpValue('SMTP_HOST').toLowerCase().includes('gmail.com')
+      ? password.replace(/\s+/g, '')
+      : password;
+  }
+
+  private logConfigurationWarning() {
+    if (this.configurationWarningLogged) return;
+    this.configurationWarningLogged = true;
+    const missing = ['SMTP_HOST', 'SMTP_FROM', 'SMTP_USER'].filter(
+      (key) => !this.smtpValue(key),
+    );
+    if (!this.smtpPassword()) missing.push('SMTP_PASS');
+    this.logger.warn(
+      `Notificaciones por correo pausadas. Faltan variables SMTP: ${missing.join(', ')}.`,
     );
   }
 
