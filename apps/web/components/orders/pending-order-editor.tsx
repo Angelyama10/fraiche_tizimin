@@ -14,6 +14,10 @@ import {
 } from 'lucide-react';
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { apiRequest, errorMessage } from '@/lib/api';
+import {
+  shippingAddressIssue,
+  toShippingAddressPayload,
+} from '@/lib/shipping-address';
 import type { CustomerAddress, Order } from '@/lib/types';
 import { useAuth } from '@/providers/auth-provider';
 import { useNotify } from '@/providers/notification-provider';
@@ -112,7 +116,7 @@ export function PendingOrderEditor({
     order.deliveryMethod as DeliveryMethod,
   );
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>(
-    order.paymentMethod as PaymentMethod,
+    (order.paymentMethod as PaymentMethod | null) ?? 'CARD',
   );
   const [paymentProvider, setPaymentProvider] = useState<PaymentProvider>(
     currentPayment?.provider === 'STRIPE' ? 'STRIPE' : 'MERCADO_PAGO',
@@ -187,17 +191,23 @@ export function PendingOrderEditor({
       notify({ title: 'Selecciona una dirección', tone: 'info' });
       return;
     }
+    if (deliveryMethod !== 'STORE_PICKUP' && customAddress) {
+      const issue = shippingAddressIssue(address);
+      if (issue) {
+        notify({
+          title: 'Revisa la dirección',
+          description: issue.message,
+          tone: 'info',
+        });
+        return;
+      }
+    }
 
     setSaving(true);
     try {
       const shippingAddress =
         deliveryMethod !== 'STORE_PICKUP' && customAddress
-          ? {
-              ...address,
-              interiorNumber: address.interiorNumber.trim() || undefined,
-              municipality: address.municipality.trim() || undefined,
-              reference: address.reference.trim() || undefined,
-            }
+          ? toShippingAddressPayload(address)
           : undefined;
       const updated = await auth.request<Order>(
         `/orders/${order.publicToken}/checkout`,

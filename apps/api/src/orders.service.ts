@@ -22,7 +22,12 @@ import {
   UserRole,
   ShippingQuoteStatus,
 } from '@prisma/client';
-import { CreateOrderDto, ListCustomerOrdersDto, UpdatePendingOrderDto } from './order.dto';
+import {
+  CreateOrderDto,
+  ListCustomerOrdersDto,
+  SelectOrderPaymentDto,
+  UpdatePendingOrderDto,
+} from './order.dto';
 import {
   calculatePromotionDiscount,
   customerCanUsePromotion,
@@ -32,9 +37,19 @@ import {
 import { PricingService } from './pricing.service';
 import { PrismaService } from './prisma.service';
 import {
+  isShippingQuoteReadyForPayment,
   resolveShippingQuote,
   SHIPPING_QUOTE_RESERVATION_MS,
 } from './shipping-quote';
+import {
+  ADDRESS_NUMBER_PATTERN,
+  ADDRESS_TEXT_PATTERN,
+  COUNTRY_PATTERN,
+  PERSON_NAME_PATTERN,
+  PHONE_PATTERN,
+  PLACE_PATTERN,
+  POSTAL_CODE_PATTERN,
+} from './shipping-address.validation';
 
 const orderInclude = {
   items: { orderBy: { createdAt: 'asc' as const } },
@@ -158,8 +173,8 @@ export class OrdersService {
             );
             const preserveExistingQuote =
               !addressChanged &&
-              order.deliveryMethod === DeliveryMethod.SHIPPING &&
-              requestedQuote.deliveryMethod === DeliveryMethod.SHIPPING &&
+              order.deliveryMethod === requestedQuote.deliveryMethod &&
+              requestedQuote.deliveryMethod !== DeliveryMethod.STORE_PICKUP &&
               order.shippingQuoteStatus === ShippingQuoteStatus.QUOTED;
             const shippingQuote = preserveExistingQuote
               ? {
@@ -170,13 +185,21 @@ export class OrdersService {
                   notes: order.shippingQuoteNotes,
                 }
               : requestedQuote;
-            this.validateDeliveryPaymentPair(
-              input.paymentMethod,
-              shippingQuote.deliveryMethod,
-            );
+            const paymentMethod =
+              shippingQuote.status === ShippingQuoteStatus.PENDING
+                ? null
+                : input.paymentMethod;
+            if (paymentMethod) {
+              this.validateDeliveryPaymentPair(
+                paymentMethod,
+                shippingQuote.deliveryMethod,
+              );
+            }
             const totalCents =
               order.subtotalCents - order.discountCents + shippingQuote.shippingCents;
-            const paymentProvider = this.resolvePaymentProvider(input);
+            const paymentProvider = paymentMethod
+              ? this.resolvePaymentProvider({ ...input, paymentMethod })
+              : null;
             const currentPayment = order.payments.find(
               (payment) =>
                 payment.status !== PaymentStatus.CANCELLED &&
@@ -184,8 +207,8 @@ export class OrdersService {
                 payment.status !== PaymentStatus.CHARGED_BACK,
             );
             const choicesChanged =
-              order.paymentMethod !== input.paymentMethod ||
-              currentPayment?.provider !== paymentProvider ||
+              order.paymentMethod !== paymentMethod ||
+              (currentPayment?.provider ?? null) !== paymentProvider ||
               order.deliveryMethod !== shippingQuote.deliveryMethod ||
               addressChanged ||
               order.totalCents !== totalCents;
@@ -196,7 +219,7 @@ export class OrdersService {
               Date.now() +
                 (shippingQuote.status === ShippingQuoteStatus.PENDING
                   ? SHIPPING_QUOTE_RESERVATION_MS
-                  : reservationLifetimeMs(input.paymentMethod)),
+                  : reservationLifetimeMs(paymentMethod!)),
             );
             const currentExpiration =
               order.expiresAt ??
@@ -246,22 +269,24 @@ export class OrdersService {
                   },
                 });
               }
-              await transaction.payment.create({
-                data: {
-                  orderId: order.id,
-                  provider: paymentProvider,
-                  method: input.paymentMethod,
-                  amountCents: totalCents,
-                  currency: order.currency,
-                  statusDetail: 'created_after_checkout_update',
-                },
-              });
+              if (paymentMethod && paymentProvider) {
+                await transaction.payment.create({
+                  data: {
+                    orderId: order.id,
+                    provider: paymentProvider,
+                    method: paymentMethod,
+                    amountCents: totalCents,
+                    currency: order.currency,
+                    statusDetail: 'created_after_checkout_update',
+                  },
+                });
+              }
             }
 
             await transaction.order.update({
               where: { id: order.id },
               data: {
-                paymentMethod: input.paymentMethod,
+                paymentMethod,
                 deliveryMethod: shippingQuote.deliveryMethod,
                 shippingAddress: shippingAddress ?? Prisma.JsonNull,
                 shippingQuoteStatus: shippingQuote.status,
@@ -319,7 +344,7 @@ export class OrdersService {
                 payload: {
                   orderId: order.id,
                   publicToken: order.publicToken,
-                  paymentMethod: input.paymentMethod,
+                  paymentMethod,
                   deliveryMethod: shippingQuote.deliveryMethod,
                   shippingQuoteStatus: shippingQuote.status,
                 },
@@ -345,6 +370,186 @@ export class OrdersService {
       }
     }
     throw new ConflictException('No fue posible actualizar el pedido. Intenta nuevamente.');
+  }
+
+  async selectPaymentMethod(
+    publicToken: string,
+    input: SelectOrderPaymentDto,
+    customerId: string,
+  ) {
+    for (let attempt = 1; attempt <= 3; attempt += 1) {
+      try {
+        await this.prisma.$transaction(
+          async (transaction) => {
+            const order = await transaction.order.findFirst({
+              where: { publicToken, customerId },
+              include: {
+                payments: { orderBy: { createdAt: 'desc' } },
+                items: { include: { reservation: true } },
+              },
+            });
+            if (!order) throw new NotFoundException('Orden no encontrada.');
+            if (order.status !== OrderStatus.PENDING_PAYMENT) {
+              throw new ConflictException('La reserva del pedido ya no esta activa.');
+            }
+            if (
+              !isShippingQuoteReadyForPayment(
+                order.deliveryMethod,
+                order.shippingQuoteStatus,
+              )
+            ) {
+              throw new ConflictException(
+                'La tienda debe confirmar el costo de entrega antes de elegir como pagar.',
+              );
+            }
+            if (
+              new Set<PaymentStatus>([
+                PaymentStatus.IN_PROCESS,
+                PaymentStatus.APPROVED,
+                PaymentStatus.REFUNDED,
+                PaymentStatus.CHARGED_BACK,
+              ]).has(order.paymentStatus)
+            ) {
+              throw new ConflictException('El pago ya se esta procesando o fue confirmado.');
+            }
+
+            const now = new Date();
+            const activeReservations = order.items.flatMap((item) =>
+              item.reservation?.status === ReservationStatus.ACTIVE
+                ? [item.reservation]
+                : [],
+            );
+            if (
+              activeReservations.length !== order.items.length ||
+              activeReservations.some((reservation) => reservation.expiresAt <= now)
+            ) {
+              throw new ConflictException(
+                'La reserva del pedido ya vencio. Vuelve a crear tu compra.',
+              );
+            }
+
+            this.validateDeliveryPaymentPair(input.paymentMethod, order.deliveryMethod);
+            const paymentProvider = this.resolvePaymentProvider(input);
+            const inactiveStatuses = new Set<PaymentStatus>([
+              PaymentStatus.CANCELLED,
+              PaymentStatus.REFUNDED,
+              PaymentStatus.CHARGED_BACK,
+            ]);
+            const currentPayment = order.payments.find(
+              (payment) => !inactiveStatuses.has(payment.status),
+            );
+            const sameSelection =
+              order.paymentMethod === input.paymentMethod &&
+              currentPayment?.method === input.paymentMethod &&
+              currentPayment.provider === paymentProvider &&
+              currentPayment.amountCents === order.totalCents &&
+              currentPayment.currency === order.currency;
+            if (sameSelection) return;
+            if (
+              currentPayment?.providerPaymentId ||
+              currentPayment?.providerPreferenceId ||
+              currentPayment?.checkoutUrl
+            ) {
+              throw new ConflictException(
+                'El cobro ya fue iniciado. Termina ese intento antes de cambiar la forma de pago.',
+              );
+            }
+
+            const replaceableStatuses = new Set<PaymentStatus>([
+              PaymentStatus.PENDING,
+              PaymentStatus.REJECTED,
+            ]);
+            const supersededPayments = order.payments.filter((payment) =>
+              replaceableStatuses.has(payment.status),
+            );
+            if (supersededPayments.length) {
+              await transaction.payment.updateMany({
+                where: { id: { in: supersededPayments.map((payment) => payment.id) } },
+                data: {
+                  status: PaymentStatus.CANCELLED,
+                  statusDetail: 'payment_method_changed_by_customer',
+                },
+              });
+              await transaction.transferProof.updateMany({
+                where: {
+                  paymentId: { in: supersededPayments.map((payment) => payment.id) },
+                  status: TransferProofStatus.PENDING_REVIEW,
+                },
+                data: {
+                  status: TransferProofStatus.REJECTED,
+                  reviewedAt: now,
+                  reviewNotes: 'Método de pago cambiado por el cliente.',
+                },
+              });
+            }
+
+            await transaction.payment.create({
+              data: {
+                orderId: order.id,
+                provider: paymentProvider,
+                method: input.paymentMethod,
+                amountCents: order.totalCents,
+                currency: order.currency,
+                statusDetail: 'selected_after_shipping_quote',
+              },
+            });
+            const maximumReservationAt = new Date(
+              order.createdAt.getTime() + reservationLifetimeMs(PaymentMethod.CASH),
+            );
+            const requestedExpiration = new Date(
+              now.getTime() + reservationLifetimeMs(input.paymentMethod),
+            );
+            const expiresAt = new Date(
+              Math.min(requestedExpiration.getTime(), maximumReservationAt.getTime()),
+            );
+            await transaction.order.update({
+              where: { id: order.id },
+              data: {
+                paymentMethod: input.paymentMethod,
+                paymentStatus: PaymentStatus.PENDING,
+                expiresAt,
+              },
+            });
+            await transaction.inventoryReservation.updateMany({
+              where: {
+                id: { in: activeReservations.map((reservation) => reservation.id) },
+                status: ReservationStatus.ACTIVE,
+              },
+              data: { expiresAt },
+            });
+            await transaction.outboxEvent.create({
+              data: {
+                type: 'ORDER_PAYMENT_METHOD_SELECTED',
+                aggregateType: 'Order',
+                aggregateId: order.id,
+                payload: {
+                  orderId: order.id,
+                  publicToken: order.publicToken,
+                  paymentMethod: input.paymentMethod,
+                  paymentProvider,
+                },
+              },
+            });
+          },
+          {
+            isolationLevel: Prisma.TransactionIsolationLevel.Serializable,
+            maxWait: 5000,
+            timeout: 15000,
+          },
+        );
+        return this.getForCustomer(publicToken, customerId);
+      } catch (error) {
+        if (
+          error instanceof Prisma.PrismaClientKnownRequestError &&
+          error.code === 'P2034' &&
+          attempt < 3
+        ) {
+          continue;
+        }
+        throw error;
+      }
+    }
+    throw new ConflictException('No fue posible guardar la forma de pago. Intenta nuevamente.');
   }
 
   async get(publicToken: string) {
@@ -485,7 +690,7 @@ export class OrdersService {
             const draft = {
               step: 'payment',
               deliveryMethod: order.deliveryMethod,
-              paymentMethod: order.paymentMethod,
+              paymentMethod: order.paymentMethod ?? PaymentMethod.CARD,
               paymentProvider:
                 currentPayment?.provider === PaymentProvider.STRIPE
                   ? PaymentProvider.STRIPE
@@ -824,15 +1029,24 @@ export class OrdersService {
       shippingAddress as Record<string, unknown> | undefined,
       now,
     );
-    this.validateDeliveryPaymentPair(input.paymentMethod, shippingQuote.deliveryMethod);
+    const paymentMethod =
+      shippingQuote.status === ShippingQuoteStatus.PENDING ? null : input.paymentMethod;
+    if (shippingQuote.status !== ShippingQuoteStatus.PENDING && !paymentMethod) {
+      throw new BadRequestException('Selecciona una forma de pago para continuar.');
+    }
+    if (paymentMethod) {
+      this.validateDeliveryPaymentPair(paymentMethod, shippingQuote.deliveryMethod);
+    }
     const customerName = [customer.firstName, customer.lastName].filter(Boolean).join(' ');
-    const paymentProvider = this.resolvePaymentProvider(input);
+    const paymentProvider = paymentMethod
+      ? this.resolvePaymentProvider({ ...input, paymentMethod })
+      : null;
 
     const expiresAt = new Date(
       Date.now() +
         (shippingQuote.status === ShippingQuoteStatus.PENDING
           ? SHIPPING_QUOTE_RESERVATION_MS
-          : reservationLifetimeMs(input.paymentMethod)),
+          : reservationLifetimeMs(paymentMethod!)),
     );
     const totalCents = subtotalCents - discountCents + shippingQuote.shippingCents;
     const order = await transaction.order.create({
@@ -843,7 +1057,7 @@ export class OrdersService {
         customerName,
         customerEmail: customer.email,
         customerPhone: customer.phone,
-        paymentMethod: input.paymentMethod,
+        paymentMethod,
         deliveryMethod: shippingQuote.deliveryMethod,
         shippingAddress,
         shippingQuoteStatus: shippingQuote.status,
@@ -924,14 +1138,16 @@ export class OrdersService {
       });
     }
 
-    await transaction.payment.create({
-      data: {
-        orderId: order.id,
-        provider: paymentProvider,
-        method: input.paymentMethod,
-        amountCents: order.totalCents,
-      },
-    });
+    if (paymentMethod && paymentProvider) {
+      await transaction.payment.create({
+        data: {
+          orderId: order.id,
+          provider: paymentProvider,
+          method: paymentMethod,
+          amountCents: order.totalCents,
+        },
+      });
+    }
 
     for (const applied of appliedPromotions) {
       await transaction.orderPromotion.create({
@@ -1002,7 +1218,9 @@ export class OrdersService {
     return `FTZ-${Date.now().toString(36).toUpperCase()}-${randomUUID().slice(0, 6).toUpperCase()}`;
   }
 
-  private resolvePaymentProvider(input: CreateOrderDto | UpdatePendingOrderDto) {
+  private resolvePaymentProvider(
+    input: CreateOrderDto | UpdatePendingOrderDto | SelectOrderPaymentDto,
+  ) {
     if (input.paymentMethod === PaymentMethod.CARD) {
       const provider = input.paymentProvider ?? PaymentProvider.MERCADO_PAGO;
       if (
@@ -1081,6 +1299,8 @@ export class OrdersService {
         provider: payment.provider,
         method: payment.method,
         status: payment.status,
+        amountCents: payment.amountCents,
+        currency: payment.currency,
         checkoutUrl: payment.checkoutUrl,
         transferProofs: payment.transferProofs,
       })),
@@ -1101,7 +1321,7 @@ export class OrdersService {
         where: { id: input.shippingAddressId, customerId },
       });
       if (!address) throw new BadRequestException('La direccion seleccionada no existe.');
-      return {
+      return this.normalizeShippingAddressSnapshot({
         recipientName: address.recipientName,
         phone: address.phone,
         street: address.street,
@@ -1114,13 +1334,13 @@ export class OrdersService {
         postalCode: address.postalCode,
         country: address.country,
         reference: address.reference,
-      };
+      });
     }
 
     if (!input.shippingAddress) {
       throw new BadRequestException('Selecciona o captura una direccion de entrega.');
     }
-    return {
+    return this.normalizeShippingAddressSnapshot({
       recipientName: input.shippingAddress.recipientName,
       phone: input.shippingAddress.phone,
       street: input.shippingAddress.street,
@@ -1133,7 +1353,90 @@ export class OrdersService {
       postalCode: input.shippingAddress.postalCode,
       country: input.shippingAddress.country,
       reference: input.shippingAddress.reference,
+    });
+  }
+
+  private normalizeShippingAddressSnapshot(
+    source: Record<string, unknown>,
+  ): Prisma.InputJsonObject {
+    const text = (key: string) => String(source[key] ?? '').trim();
+    const recipientName = text('recipientName').replace(/\s+/g, ' ');
+    const phone = text('phone').replace(/\D/g, '');
+    const street = text('street').replace(/\s+/g, ' ');
+    const exteriorNumber = text('exteriorNumber').replace(/\s+/g, ' ');
+    const interiorNumber = text('interiorNumber').replace(/\s+/g, ' ');
+    const neighborhood = text('neighborhood').replace(/\s+/g, ' ');
+    const city = text('city').replace(/\s+/g, ' ');
+    const municipality = text('municipality').replace(/\s+/g, ' ');
+    const state = text('state').replace(/\s+/g, ' ');
+    const postalCode = text('postalCode').replace(/\D/g, '');
+    const country = text('country').toUpperCase();
+    const reference = text('reference').replace(/\s+/g, ' ');
+
+    const invalid = (message: string): never => {
+      throw new BadRequestException(`Corrige la direccion de entrega: ${message}`);
     };
+    if (
+      recipientName.length < 3 ||
+      recipientName.length > 120 ||
+      !PERSON_NAME_PATTERN.test(recipientName)
+    ) {
+      invalid('escribe el nombre completo de quien recibe.');
+    }
+    if (!PHONE_PATTERN.test(phone)) invalid('el telefono debe tener 10 digitos.');
+    if (street.length < 3 || street.length > 160 || !ADDRESS_TEXT_PATTERN.test(street)) {
+      invalid('escribe una calle valida.');
+    }
+    if (
+      exteriorNumber.length > 20 ||
+      !ADDRESS_NUMBER_PATTERN.test(exteriorNumber)
+    ) {
+      invalid('escribe el numero exterior.');
+    }
+    if (
+      interiorNumber &&
+      (interiorNumber.length > 20 || !ADDRESS_NUMBER_PATTERN.test(interiorNumber))
+    ) {
+      invalid('el numero interior no es valido.');
+    }
+    for (const [value, label] of [
+      [neighborhood, 'colonia'],
+      [city, 'ciudad'],
+      [municipality, 'municipio'],
+      [state, 'estado'],
+    ] as const) {
+      if (value.length < 2 || value.length > 100 || !PLACE_PATTERN.test(value)) {
+        invalid(`escribe ${label} correctamente.`);
+      }
+    }
+    if (!POSTAL_CODE_PATTERN.test(postalCode)) {
+      invalid('el codigo postal debe tener 5 digitos.');
+    }
+    if (!COUNTRY_PATTERN.test(country)) invalid('el pais debe ser Mexico.');
+    if (
+      reference &&
+      (reference.length < 5 ||
+        reference.length > 300 ||
+        !ADDRESS_TEXT_PATTERN.test(reference))
+    ) {
+      invalid('la referencia debe describir un punto cercano valido.');
+    }
+
+    const normalized: Prisma.InputJsonObject = {
+      recipientName,
+      phone,
+      street,
+      exteriorNumber,
+      ...(interiorNumber ? { interiorNumber } : {}),
+      neighborhood,
+      city,
+      municipality,
+      state,
+      postalCode,
+      country,
+      ...(reference ? { reference } : {}),
+    };
+    return normalized;
   }
 
   private validateDeliveryPaymentPair(

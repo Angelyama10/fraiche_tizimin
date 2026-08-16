@@ -45,6 +45,7 @@ import {
   PriceAdjustmentScope,
 } from './price-adjustment';
 import { PrismaService } from './prisma.service';
+import { SHIPPING_QUOTE_RESERVATION_MS } from './shipping-quote';
 
 type RevenueRow = {
   todayRevenueCents: bigint;
@@ -354,7 +355,46 @@ export class AdminCommerceService {
         customer: {
           select: { id: true, email: true, firstName: true, lastName: true, phone: true },
         },
-        items: { orderBy: { createdAt: 'asc' } },
+        items: {
+          include: {
+            variant: {
+              select: {
+                attributes: true,
+                product: {
+                  select: {
+                    name: true,
+                    shortDescription: true,
+                    description: true,
+                    attributes: true,
+                    brand: { select: { name: true } },
+                    inspirationHouse: { select: { name: true } },
+                    images: {
+                      select: { url: true, altText: true },
+                      orderBy: [{ isPrimary: 'desc' }, { sortOrder: 'asc' }],
+                      take: 1,
+                    },
+                    categories: {
+                      select: { category: { select: { name: true } } },
+                      orderBy: { category: { sortOrder: 'asc' } },
+                    },
+                    catalogLines: {
+                      select: {
+                        catalogLine: {
+                          select: {
+                            name: true,
+                            section: { select: { name: true } },
+                          },
+                        },
+                      },
+                      orderBy: { catalogLine: { sortOrder: 'asc' } },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          orderBy: { createdAt: 'asc' },
+        },
         payments: {
           include: { transferProofs: { orderBy: { createdAt: 'desc' } } },
           orderBy: { createdAt: 'desc' },
@@ -388,8 +428,8 @@ export class AdminCommerceService {
         if (order.status !== OrderStatus.PENDING_PAYMENT) {
           throw new ConflictException('Solo se puede cotizar una orden pendiente de pago.');
         }
-        if (order.deliveryMethod !== DeliveryMethod.SHIPPING) {
-          throw new BadRequestException('Esta orden no requiere una cotizacion de paqueteria.');
+        if (order.deliveryMethod === DeliveryMethod.STORE_PICKUP) {
+          throw new BadRequestException('Esta orden no requiere un costo de entrega.');
         }
         if (
           order.shippingQuoteStatus !== ShippingQuoteStatus.PENDING &&
@@ -416,13 +456,13 @@ export class AdminCommerceService {
               PaymentStatus.CHARGED_BACK,
             ]).has(payment.status),
         );
-        if (!activePayment) {
+        if (!activePayment && order.paymentMethod) {
           throw new ConflictException('La orden no tiene un pago pendiente que pueda actualizarse.');
         }
         if (
-          activePayment.providerPaymentId ||
-          activePayment.providerPreferenceId ||
-          activePayment.checkoutUrl
+          activePayment?.providerPaymentId ||
+          activePayment?.providerPreferenceId ||
+          activePayment?.checkoutUrl
         ) {
           throw new ConflictException(
             'El cobro ya fue iniciado. Cancela el intento antes de cambiar el envio.',
@@ -447,16 +487,23 @@ export class AdminCommerceService {
           0,
           order.subtotalCents - order.discountCents + shippingCents,
         );
-        const expiresAt = new Date(now.getTime() + reservationLifetimeMs(order.paymentMethod));
+        const expiresAt = new Date(
+          now.getTime() +
+            (order.paymentMethod
+              ? reservationLifetimeMs(order.paymentMethod)
+              : SHIPPING_QUOTE_RESERVATION_MS),
+        );
 
         await transaction.inventoryReservation.updateMany({
           where: { id: { in: activeReservations.map((reservation) => reservation.id) } },
           data: { expiresAt },
         });
-        await transaction.payment.update({
-          where: { id: activePayment.id },
-          data: { amountCents: totalCents },
-        });
+        if (activePayment) {
+          await transaction.payment.update({
+            where: { id: activePayment.id },
+            data: { amountCents: totalCents },
+          });
+        }
         await transaction.order.update({
           where: { id: order.id },
           data: {

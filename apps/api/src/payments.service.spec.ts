@@ -8,6 +8,7 @@ import {
   PaymentMethod,
   PaymentProvider,
   PaymentStatus,
+  ShippingQuoteStatus,
 } from '@prisma/client';
 import { PrismaService } from './prisma.service';
 import { PaymentsService } from './payments.service';
@@ -81,6 +82,121 @@ test('el link de Mercado Pago funciona sin la llave publica de tarjeta', () => {
   assert.equal(configuration.mercadoPago.publicKey, null);
 });
 
+test('el link de Mercado Pago cobra el total final con envio y descuentos', async () => {
+  let requestBody: Record<string, unknown> | undefined;
+  const payment = {
+    id: 'payment-link-1',
+    provider: PaymentProvider.MERCADO_PAGO,
+    method: PaymentMethod.PAYMENT_LINK,
+    status: PaymentStatus.PENDING,
+    amountCents: 10_500,
+    currency: 'MXN',
+    providerPreferenceId: null,
+    checkoutUrl: null,
+  };
+  const order = {
+    id: 'order-link-1',
+    publicToken: 'order-link-token',
+    number: 'FTZ-LINK',
+    customerId: 'customer-1',
+    customerName: 'Cliente',
+    customerEmail: 'cliente@example.com',
+    customerPhone: '9990000000',
+    status: OrderStatus.PENDING_PAYMENT,
+    paymentStatus: PaymentStatus.PENDING,
+    paymentMethod: PaymentMethod.PAYMENT_LINK,
+    deliveryMethod: DeliveryMethod.SHIPPING,
+    shippingQuoteStatus: ShippingQuoteStatus.QUOTED,
+    currency: 'MXN',
+    subtotalCents: 10_000,
+    discountCents: 500,
+    shippingCents: 1_000,
+    totalCents: 10_500,
+    expiresAt: new Date(Date.now() + 30 * 60 * 1000),
+    items: [
+      {
+        sku: 'SKU-1',
+        productName: 'Perfume',
+        variantName: '100 ml',
+        quantity: 2,
+      },
+    ],
+    payments: [payment],
+  };
+  const prisma = {
+    order: { findFirst: async () => order },
+    payment: { update: async () => payment },
+  } as unknown as PrismaService;
+  const service = new PaymentsService(
+    prisma,
+    configService({
+      PUBLIC_API_URL: 'https://api.example.com',
+      WEB_APP_URL: 'https://shop.example.com',
+      MERCADOPAGO_ACCESS_TOKEN: 'APP_USR-secret',
+    }),
+  );
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (_input, init) => {
+    requestBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
+    return new Response(
+      JSON.stringify({ id: 'preference-1', init_point: 'https://mp.example/checkout' }),
+      { status: 200, headers: { 'Content-Type': 'application/json' } },
+    );
+  };
+
+  try {
+    await service.createMercadoPagoPreference(order.publicToken, 'customer-1');
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.deepEqual(requestBody?.items, [
+    {
+      id: order.number,
+      title: `Pedido ${order.number}`,
+      description: '2 producto(s), envío y descuentos incluidos',
+      quantity: 1,
+      currency_id: 'MXN',
+      unit_price: 105,
+    },
+  ]);
+});
+
+test('el link de pago no se crea mientras el envio siga pendiente', async () => {
+  let fetchCalls = 0;
+  const order = {
+    publicToken: 'order-pending-quote',
+    status: OrderStatus.PENDING_PAYMENT,
+    paymentStatus: PaymentStatus.PENDING,
+    paymentMethod: PaymentMethod.PAYMENT_LINK,
+    deliveryMethod: DeliveryMethod.LOCAL_DELIVERY,
+    shippingQuoteStatus: ShippingQuoteStatus.PENDING,
+    expiresAt: new Date(Date.now() + 30 * 60 * 1000),
+    items: [],
+    payments: [],
+  };
+  const prisma = {
+    order: { findFirst: async () => order },
+  } as unknown as PrismaService;
+  const service = new PaymentsService(prisma, configService({}));
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => {
+    fetchCalls += 1;
+    return new Response();
+  };
+
+  try {
+    await assert.rejects(
+      service.createMercadoPagoPreference(order.publicToken, 'customer-1'),
+      /confirmar el costo de entrega/,
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.equal(fetchCalls, 0);
+});
+
 test('Mercado Pago cobra el total y correo guardados en la orden', async () => {
   let requestBody: Record<string, unknown> | undefined;
   const payment = {
@@ -114,11 +230,12 @@ test('Mercado Pago cobra el total y correo guardados en la orden', async () => {
     fulfillmentStatus: FulfillmentStatus.UNFULFILLED,
     paymentMethod: PaymentMethod.CARD,
     deliveryMethod: DeliveryMethod.SHIPPING,
+    shippingQuoteStatus: ShippingQuoteStatus.QUOTED,
     shippingAddress: null,
     currency: 'MXN',
-    subtotalCents: 42_000,
-    discountCents: 0,
-    shippingCents: 0,
+    subtotalCents: 40_000,
+    discountCents: 1_500,
+    shippingCents: 3_500,
     totalCents: 42_000,
     customerNotes: null,
     internalNotes: null,
@@ -221,6 +338,7 @@ test('Stripe no reembolsa cuando otra solicitud ya confirmo y consumio la reserv
     fulfillmentStatus: FulfillmentStatus.UNFULFILLED,
     paymentMethod: PaymentMethod.CARD,
     deliveryMethod: DeliveryMethod.SHIPPING,
+    shippingQuoteStatus: ShippingQuoteStatus.QUOTED,
     shippingAddress: null,
     currency: 'MXN',
     subtotalCents: 1_000,
@@ -327,6 +445,7 @@ test('Stripe conserva el reembolso automatico para una reserva realmente expirad
     fulfillmentStatus: FulfillmentStatus.UNFULFILLED,
     paymentMethod: PaymentMethod.CARD,
     deliveryMethod: DeliveryMethod.SHIPPING,
+    shippingQuoteStatus: ShippingQuoteStatus.QUOTED,
     shippingAddress: null,
     currency: 'MXN',
     subtotalCents: 1_000,
@@ -434,6 +553,7 @@ test('Stripe reembolsa un intento sustituido sin alterar la nueva forma de pago'
     fulfillmentStatus: FulfillmentStatus.UNFULFILLED,
     paymentMethod: PaymentMethod.BANK_TRANSFER,
     deliveryMethod: DeliveryMethod.SHIPPING,
+    shippingQuoteStatus: ShippingQuoteStatus.QUOTED,
     shippingAddress: null,
     currency: 'MXN',
     subtotalCents: 1_000,

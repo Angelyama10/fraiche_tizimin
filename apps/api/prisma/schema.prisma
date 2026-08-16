@@ -621,7 +621,7 @@ model Order {
   status             OrderStatus         @default(PENDING_PAYMENT)
   paymentStatus      PaymentStatus       @default(PENDING)
   fulfillmentStatus  FulfillmentStatus   @default(UNFULFILLED)
-  paymentMethod      PaymentMethod
+  paymentMethod      PaymentMethod?
   deliveryMethod     DeliveryMethod
   shippingAddress    Json?
   shippingQuoteStatus ShippingQuoteStatus @default(NOT_REQUIRED)

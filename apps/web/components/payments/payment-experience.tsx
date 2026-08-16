@@ -11,8 +11,11 @@ import { loadStripe } from '@stripe/stripe-js';
 import {
   ArrowLeft,
   ArrowRight,
+  Check,
   CheckCircle2,
   CreditCard,
+  Landmark,
+  Link2,
   LockKeyhole,
   Package,
   ShieldCheck,
@@ -79,6 +82,14 @@ export function PaymentExperience({
   const [configuration, setConfiguration] = useState<GatewayConfiguration | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [reopeningCheckout, setReopeningCheckout] = useState(false);
+  const [continuingPayment, setContinuingPayment] = useState(false);
+  const [continuationError, setContinuationError] = useState<string | null>(null);
+  const [selectedPaymentMethod, setSelectedPaymentMethod] =
+    useState<Exclude<CheckoutPaymentMethod, 'CASH'>>('CARD');
+  const [selectedPaymentProvider, setSelectedPaymentProvider] =
+    useState<CheckoutPaymentProvider>('MERCADO_PAGO');
+  const [selectingPayment, setSelectingPayment] = useState(false);
+  const [selectionError, setSelectionError] = useState<string | null>(null);
 
   useEffect(() => {
     if (auth.status !== 'authenticated') return;
@@ -140,6 +151,16 @@ export function PaymentExperience({
       window.clearInterval(timer);
     };
   }, [auth, order?.shippingQuoteStatus, orderToken]);
+
+  useEffect(() => {
+    if (
+      configuration &&
+      !configuration.mercadoPago.cardEnabled &&
+      configuration.stripe.enabled
+    ) {
+      setSelectedPaymentProvider('STRIPE');
+    }
+  }, [configuration]);
 
   if (auth.status === 'loading' || (auth.status === 'authenticated' && !order && !error)) {
     return <main className="paymentLoading"><span className="buttonSpinner" /> Preparando pago seguro...</main>;
@@ -211,18 +232,64 @@ export function PaymentExperience({
   const currentPayment = activePayment(order);
   const currentProvider =
     currentPayment?.method === 'CARD' ? currentPayment.provider : provider;
+  const waitingForShippingQuote = order.shippingQuoteStatus === 'PENDING';
+  const paymentSelectionRequired =
+    !waitingForShippingQuote && order.paymentMethod === null;
+  const summaryProvider = !order.paymentMethod
+    ? null
+    : order.paymentMethod === 'PAYMENT_LINK'
+      ? 'MERCADO_PAGO'
+      : order.paymentMethod === 'BANK_TRANSFER'
+        ? 'BANK_TRANSFER'
+        : currentProvider ?? 'Pasarela';
   const canEditCheckout =
     order.status === 'PENDING_PAYMENT' &&
     new Date(order.expiresAt).getTime() > Date.now() &&
     !['APPROVED', 'IN_PROCESS', 'REFUNDED', 'CHARGED_BACK'].includes(
       order.paymentStatus,
     );
-  const providerAvailable =
-    currentProvider === 'MERCADO_PAGO'
-      ? configuration.mercadoPago.cardEnabled
-      : currentProvider === 'STRIPE'
-        ? configuration.stripe.enabled
-        : false;
+  const providerAvailable = !order.paymentMethod
+    ? false
+    : order.paymentMethod === 'PAYMENT_LINK'
+      ? configuration.mercadoPago.linkEnabled
+      : order.paymentMethod === 'BANK_TRANSFER'
+        ? true
+        : currentProvider === 'MERCADO_PAGO'
+          ? configuration.mercadoPago.cardEnabled
+          : currentProvider === 'STRIPE'
+            ? configuration.stripe.enabled
+            : false;
+  const selectedPaymentAvailable =
+    selectedPaymentMethod === 'PAYMENT_LINK'
+      ? configuration.mercadoPago.linkEnabled
+      : selectedPaymentMethod === 'CARD'
+        ? selectedPaymentProvider === 'MERCADO_PAGO'
+          ? configuration.mercadoPago.cardEnabled
+          : configuration.stripe.enabled
+        : true;
+  const paymentEyebrow = waitingForShippingQuote
+    ? deliveryMethodLabel(order.deliveryMethod)
+    : paymentSelectionRequired
+      ? 'Envío confirmado'
+      : paymentMethodLabel(order.paymentMethod ?? 'CARD', currentProvider);
+  const paymentTitle = waitingForShippingQuote
+    ? 'Estamos cotizando tu entrega.'
+    : paymentSelectionRequired
+      ? 'Elige cómo pagar tu total.'
+    : order.paymentMethod === 'BANK_TRANSFER'
+      ? 'Tu total está listo para transferir.'
+      : order.paymentMethod === 'PAYMENT_LINK'
+        ? 'Tu total está listo para pagar.'
+        : 'Completa tu pago seguro.';
+  const paymentDescription = waitingForShippingQuote
+    ? 'La tienda revisará tu destino y añadirá el costo exacto antes de habilitar el pago.'
+    : paymentSelectionRequired
+      ? 'El costo de entrega ya está incluido. Ahora selecciona una opción para abrir la pasarela correspondiente.'
+    : order.paymentMethod === 'BANK_TRANSFER'
+      ? 'Consulta los datos bancarios y sube tu comprobante desde el seguimiento del pedido.'
+      : order.paymentMethod === 'PAYMENT_LINK'
+        ? 'Abre Mercado Pago para completar el importe final de tu pedido.'
+        : 'Captura tus datos directamente en el formulario protegido de la pasarela.';
 
   async function reopenCheckout() {
     if (!canEditCheckout || reopeningCheckout) return;
@@ -255,6 +322,57 @@ export function PaymentExperience({
     }
   }
 
+  async function continueSelectedPayment() {
+    if (continuingPayment) return;
+    const selectedPaymentMethod = order?.paymentMethod;
+    if (!selectedPaymentMethod) return;
+    setContinuingPayment(true);
+    setContinuationError(null);
+    try {
+      if (selectedPaymentMethod === 'PAYMENT_LINK') {
+        const preference = await auth.request<{ checkoutUrl: string }>(
+          `/payments/mercado-pago/orders/${orderToken}/preference`,
+          { method: 'POST' },
+        );
+        window.location.assign(preference.checkoutUrl);
+        return;
+      }
+      if (selectedPaymentMethod === 'BANK_TRANSFER') {
+        router.push(`/pedidos/${orderToken}?transferencia=1`);
+      }
+    } catch (continueError) {
+      setContinuationError(errorMessage(continueError));
+    } finally {
+      setContinuingPayment(false);
+    }
+  }
+
+  async function confirmPaymentMethod() {
+    if (selectingPayment || !selectedPaymentAvailable) return;
+    setSelectingPayment(true);
+    setSelectionError(null);
+    try {
+      const updated = await auth.request<Order>(
+        `/orders/${orderToken}/payment-method`,
+        {
+          method: 'PATCH',
+          body: JSON.stringify({
+            paymentMethod: selectedPaymentMethod,
+            paymentProvider:
+              selectedPaymentMethod === 'CARD'
+                ? selectedPaymentProvider
+                : undefined,
+          }),
+        },
+      );
+      setOrder(updated);
+    } catch (selectError) {
+      setSelectionError(errorMessage(selectError));
+    } finally {
+      setSelectingPayment(false);
+    }
+  }
+
   return (
     <main className="paymentPage">
       <div className="paymentTopbar pageWidth">
@@ -282,35 +400,40 @@ export function PaymentExperience({
       <nav aria-label="Progreso de compra" className="paymentFlowProgress pageWidth">
         <span>1. Revisión</span>
         <span>2. Entrega</span>
-        <span>3. Método</span>
+        <span>3. Solicitud</span>
         <strong aria-current="step">
-          {order.shippingQuoteStatus === 'PENDING' ? '4. Cotización' : '4. Pago seguro'}
+          {waitingForShippingQuote ? '4. Cotización' : '4. Pago'}
         </strong>
       </nav>
       <div className="paymentLayout pageWidth">
         <section className="paymentPanel">
           <div className="paymentPanel__intro">
             <span className="eyebrow">
-              {order.shippingQuoteStatus === 'PENDING' ? 'Envío nacional' : 'Pago seguro'} · {order.number}
+              {paymentEyebrow} · {order.number}
             </span>
-            <h1>
-              {order.shippingQuoteStatus === 'PENDING'
-                ? 'Estamos calculando tu envío.'
-                : 'Una última nota para cerrar la compra.'}
-            </h1>
-            <p>
-              {order.shippingQuoteStatus === 'PENDING'
-                ? 'La tienda revisará tu destino y añadirá el costo exacto antes de habilitar el pago.'
-                : 'Completa tus datos en el formulario protegido de la pasarela.'}
-            </p>
+            <h1>{paymentTitle}</h1>
+            <p>{paymentDescription}</p>
           </div>
           <div className="paymentTrust">
             <span><ShieldCheck size={18} /><strong>Protección antifraude</strong></span>
             <span><LockKeyhole size={18} /><strong>Datos tokenizados</strong></span>
             <span><Sparkles size={18} /><strong>Confirmación inmediata</strong></span>
           </div>
-          {order.shippingQuoteStatus === 'PENDING' ? (
+          {waitingForShippingQuote ? (
             <ShippingQuoteWaiting order={order} />
+          ) : paymentSelectionRequired ? (
+            <PostQuotePaymentSelector
+              configuration={configuration}
+              error={selectionError}
+              loading={selectingPayment}
+              method={selectedPaymentMethod}
+              onConfirm={() => {
+                void confirmPaymentMethod();
+              }}
+              onMethodChange={setSelectedPaymentMethod}
+              onProviderChange={setSelectedPaymentProvider}
+              provider={selectedPaymentProvider}
+            />
           ) : !providerAvailable ? (
             <div className="paymentUnavailable">
               <CreditCard size={22} />
@@ -319,6 +442,15 @@ export function PaymentExperience({
                 <p>La orden quedó guardada. Puedes volver a su seguimiento sin perderla.</p>
               </div>
             </div>
+          ) : order.paymentMethod === 'PAYMENT_LINK' || order.paymentMethod === 'BANK_TRANSFER' ? (
+            <PaymentContinuation
+              error={continuationError}
+              loading={continuingPayment}
+              method={order.paymentMethod as 'PAYMENT_LINK' | 'BANK_TRANSFER'}
+              onContinue={() => {
+                void continueSelectedPayment();
+              }}
+            />
           ) : currentProvider === 'MERCADO_PAGO' && configuration.mercadoPago.publicKey ? (
             <MercadoPagoForm
               key={currentPayment?.id ?? 'mercado-pago'}
@@ -335,9 +467,136 @@ export function PaymentExperience({
             <div className="paymentUnavailable">Pasarela no reconocida.</div>
           )}
         </section>
-        <OrderPaymentSummary order={order} provider={currentProvider ?? 'Pasarela'} />
+        <OrderPaymentSummary order={order} provider={summaryProvider} />
       </div>
     </main>
+  );
+}
+
+function PostQuotePaymentSelector({
+  configuration,
+  error,
+  loading,
+  method,
+  onConfirm,
+  onMethodChange,
+  onProviderChange,
+  provider,
+}: {
+  configuration: GatewayConfiguration;
+  error: string | null;
+  loading: boolean;
+  method: Exclude<CheckoutPaymentMethod, 'CASH'>;
+  onConfirm: () => void;
+  onMethodChange: (method: Exclude<CheckoutPaymentMethod, 'CASH'>) => void;
+  onProviderChange: (provider: CheckoutPaymentProvider) => void;
+  provider: CheckoutPaymentProvider;
+}) {
+  const cardAvailable =
+    configuration.mercadoPago.cardEnabled || configuration.stripe.enabled;
+  const available =
+    method === 'PAYMENT_LINK'
+      ? configuration.mercadoPago.linkEnabled
+      : method === 'CARD'
+        ? provider === 'MERCADO_PAGO'
+          ? configuration.mercadoPago.cardEnabled
+          : configuration.stripe.enabled
+        : true;
+  const options = [
+    {
+      id: 'CARD' as const,
+      title: 'Tarjeta en línea',
+      note: 'Crédito o débito en formulario protegido',
+      icon: CreditCard,
+      disabled: !cardAvailable,
+    },
+    {
+      id: 'PAYMENT_LINK' as const,
+      title: 'Link de Mercado Pago',
+      note: 'Continúa en Mercado Pago',
+      icon: Link2,
+      disabled: !configuration.mercadoPago.linkEnabled,
+    },
+    {
+      id: 'BANK_TRANSFER' as const,
+      title: 'Transferencia',
+      note: 'Consulta los datos y sube tu comprobante',
+      icon: Landmark,
+      disabled: false,
+    },
+  ];
+
+  return (
+    <section className="postQuotePaymentSelector">
+      <div className="postQuotePaymentSelector__status">
+        <CheckCircle2 aria-hidden="true" size={18} />
+        <span>
+          <strong>Envío confirmado</strong>
+          <small>El total mostrado ya incluye la entrega.</small>
+        </span>
+      </div>
+      <div className="postQuotePaymentSelector__methods">
+        {options.map((option) => {
+          const Icon = option.icon;
+          return (
+            <button
+              className={method === option.id ? 'isActive' : ''}
+              disabled={option.disabled}
+              key={option.id}
+              onClick={() => onMethodChange(option.id)}
+              type="button"
+            >
+              <Icon aria-hidden="true" size={19} />
+              <span>
+                <strong>{option.title}</strong>
+                <small>{option.disabled ? 'Temporalmente no disponible' : option.note}</small>
+              </span>
+              {method === option.id && <Check aria-hidden="true" size={15} />}
+            </button>
+          );
+        })}
+      </div>
+      {method === 'CARD' && (
+        <div aria-label="Selecciona la pasarela" className="postQuoteGatewaySelector">
+          <button
+            className={provider === 'MERCADO_PAGO' ? 'isActive' : ''}
+            disabled={!configuration.mercadoPago.cardEnabled}
+            onClick={() => onProviderChange('MERCADO_PAGO')}
+            type="button"
+          >
+            <span className="gatewayBadge gatewayBadge--mp">MP</span>
+            <span><strong>Mercado Pago</strong><small>Tarjetas nacionales</small></span>
+            {provider === 'MERCADO_PAGO' && <Check size={14} />}
+          </button>
+          <button
+            className={provider === 'STRIPE' ? 'isActive' : ''}
+            disabled={!configuration.stripe.enabled}
+            onClick={() => onProviderChange('STRIPE')}
+            type="button"
+          >
+            <span className="gatewayBadge gatewayBadge--stripe">S</span>
+            <span><strong>Stripe</strong><small>Tarjetas y autenticación bancaria</small></span>
+            {provider === 'STRIPE' && <Check size={14} />}
+          </button>
+        </div>
+      )}
+      {error && <p className="paymentFormError">{error}</p>}
+      <button
+        className="button button--dark button--large button--wide"
+        disabled={!available || loading}
+        onClick={onConfirm}
+        type="button"
+      >
+        {loading ? (
+          <span className="buttonSpinner" />
+        ) : (
+          <>Continuar con esta forma de pago <ArrowRight size={18} /></>
+        )}
+      </button>
+      <p className="postQuotePaymentSelector__note">
+        <LockKeyhole size={14} /> La pasarela se abrirá únicamente después de confirmar esta selección.
+      </p>
+    </section>
   );
 }
 
@@ -353,12 +612,54 @@ function ShippingQuoteWaiting({ order }: { order: Order }) {
         <h2>Tu pedido está reservado.</h2>
         <p>
           En cuanto la tienda confirme el envío, el total se actualizará aquí
-          automáticamente y podrás pagar con el método que elegiste.
+          automáticamente y podrás elegir cómo pagar.
         </p>
         <Link href={`/pedidos/${order.publicToken}`}>
           Ver seguimiento <ArrowRight size={15} />
         </Link>
       </div>
+    </section>
+  );
+}
+
+function PaymentContinuation({
+  method,
+  loading,
+  error,
+  onContinue,
+}: {
+  method: 'PAYMENT_LINK' | 'BANK_TRANSFER';
+  loading: boolean;
+  error: string | null;
+  onContinue: () => void;
+}) {
+  const Icon = method === 'PAYMENT_LINK' ? Link2 : Landmark;
+  const title =
+    method === 'PAYMENT_LINK'
+      ? 'Tu enlace de Mercado Pago ya puede abrirse.'
+      : 'Ya puedes continuar con la transferencia.';
+  const action =
+    method === 'PAYMENT_LINK' ? 'Abrir Mercado Pago' : 'Ver datos para transferir';
+
+  return (
+    <section className="paymentContinuation">
+      <div className="paymentContinuation__heading">
+        <span><Icon aria-hidden="true" size={22} /></span>
+        <div>
+          <span className="eyebrow">Envío confirmado</span>
+          <h2>{title}</h2>
+        </div>
+      </div>
+      <p>El costo del envío ya está incluido en el total de tu pedido.</p>
+      {error && <p className="paymentFormError">{error}</p>}
+      <button
+        className="button button--dark button--large button--wide"
+        disabled={loading}
+        onClick={onContinue}
+        type="button"
+      >
+        {loading ? <span className="buttonSpinner" /> : <>{action} <ArrowRight size={18} /></>}
+      </button>
     </section>
   );
 }
@@ -567,7 +868,7 @@ function StripePaymentForm({ order }: { order: Order }) {
   );
 }
 
-function OrderPaymentSummary({ order, provider }: { order: Order; provider: string }) {
+function OrderPaymentSummary({ order, provider }: { order: Order; provider: string | null }) {
   return (
     <aside className="paymentSummary">
       <span className="eyebrow">Tu pedido</span>
@@ -600,7 +901,34 @@ function OrderPaymentSummary({ order, provider }: { order: Order; provider: stri
         </span>
         <span><small>Total</small><strong>{formatMoney(order.totalCents, order.currency)}</strong></span>
       </div>
-      <p><ShieldCheck size={15} /> Procesado por {provider === 'MERCADO_PAGO' ? 'Mercado Pago' : provider === 'STRIPE' ? 'Stripe' : provider}</p>
+      <p>
+        <ShieldCheck size={15} />{' '}
+        {provider
+          ? `Procesado por ${providerLabel(provider)}`
+          : order.shippingQuoteStatus === 'PENDING'
+            ? 'El pago se habilita al confirmar la entrega'
+            : 'Elige una forma de pago para continuar'}
+      </p>
     </aside>
   );
+}
+
+function providerLabel(provider: string) {
+  if (provider === 'MERCADO_PAGO') return 'Mercado Pago';
+  if (provider === 'STRIPE') return 'Stripe';
+  if (provider === 'BANK_TRANSFER') return 'transferencia bancaria';
+  return provider;
+}
+
+function deliveryMethodLabel(method: string) {
+  if (method === 'LOCAL_DELIVERY') return 'Entrega local';
+  if (method === 'STORE_PICKUP') return 'Recoger en tienda';
+  return 'Envío nacional';
+}
+
+function paymentMethodLabel(method: string, provider?: string) {
+  if (method === 'BANK_TRANSFER') return 'Transferencia bancaria';
+  if (method === 'PAYMENT_LINK') return 'Link de Mercado Pago';
+  if (method === 'CASH') return 'Pago en tienda';
+  return provider === 'STRIPE' ? 'Pago con Stripe' : 'Pago con Mercado Pago';
 }

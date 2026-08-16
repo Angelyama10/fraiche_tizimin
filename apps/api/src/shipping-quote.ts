@@ -1,6 +1,5 @@
 import { DeliveryMethod, ShippingQuoteStatus } from '@prisma/client';
 
-export const TIZIMIN_DELIVERY_FEE_CENTS = 3_500;
 export const SHIPPING_QUOTE_RESERVATION_MS = 24 * 60 * 60 * 1000;
 
 type ShippingAddress = {
@@ -17,25 +16,20 @@ export type ShippingQuoteResolution = {
   notes: string | null;
 };
 
-function normalizePlace(value: unknown) {
-  return String(value ?? '')
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .trim()
-    .toLowerCase();
-}
-
-export function isTiziminAddress(address: ShippingAddress | null | undefined) {
-  if (!address) return false;
-  return [address.city, address.municipality]
-    .map(normalizePlace)
-    .some((value) => value === 'tizimin' || value.includes('tizimin'));
+export function isShippingQuoteReadyForPayment(
+  deliveryMethod: DeliveryMethod,
+  status: ShippingQuoteStatus,
+) {
+  return (
+    deliveryMethod === DeliveryMethod.STORE_PICKUP ||
+    status === ShippingQuoteStatus.QUOTED
+  );
 }
 
 export function resolveShippingQuote(
   requestedMethod: DeliveryMethod,
-  address: ShippingAddress | null | undefined,
-  now = new Date(),
+  _address: ShippingAddress | null | undefined,
+  _now = new Date(),
 ): ShippingQuoteResolution {
   if (requestedMethod === DeliveryMethod.STORE_PICKUP) {
     return {
@@ -47,18 +41,8 @@ export function resolveShippingQuote(
     };
   }
 
-  if (isTiziminAddress(address)) {
-    return {
-      deliveryMethod: DeliveryMethod.LOCAL_DELIVERY,
-      shippingCents: TIZIMIN_DELIVERY_FEE_CENTS,
-      status: ShippingQuoteStatus.QUOTED,
-      quotedAt: now,
-      notes: 'Tarifa fija de entrega en Tizimin.',
-    };
-  }
-
   return {
-    deliveryMethod: DeliveryMethod.SHIPPING,
+    deliveryMethod: requestedMethod,
     shippingCents: 0,
     status: ShippingQuoteStatus.PENDING,
     quotedAt: null,

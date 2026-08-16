@@ -500,6 +500,44 @@
   font-size: 8px;
 }
 
+.quoteRequestCard {
+  display: grid;
+  margin-top: 16px;
+  border: 1px solid #b9d9d1;
+  border-radius: 7px;
+  padding: 18px;
+  background: linear-gradient(135deg, #edf8f5, #fff);
+  grid-template-columns: auto 1fr auto;
+  align-items: start;
+  gap: 12px;
+}
+
+.quoteRequestCard > span {
+  display: grid;
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  color: var(--emerald);
+  background: #d8eee8;
+  place-items: center;
+}
+
+.quoteRequestCard strong {
+  font-size: 11px;
+}
+
+.quoteRequestCard p {
+  max-width: 600px;
+  margin: 5px 0 0;
+  color: var(--ink-soft);
+  font-size: 9px;
+  line-height: 1.55;
+}
+
+.quoteRequestCard > svg {
+  color: var(--emerald);
+}
+
 .checkoutExtras {
   max-width: 630px;
 }

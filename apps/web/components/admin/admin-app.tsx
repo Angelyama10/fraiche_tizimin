@@ -39,6 +39,7 @@ import {
   Truck,
   X,
 } from 'lucide-react';
+import Image from 'next/image';
 import Link from 'next/link';
 import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
 import { apiRequest, errorMessage, getApiBaseUrl } from '@/lib/api';
@@ -121,16 +122,32 @@ type AdminOrder = {
   publicToken: string; number: string; customerName: string; customerEmail?: string; customerPhone?: string;
   status: string; paymentStatus: string; fulfillmentStatus: string; subtotalCents: number; discountCents: number;
   shippingCents: number; totalCents: number; currency: string;
-  paymentMethod: string; deliveryMethod: string; shippingAddress?: Record<string, string | null> | null;
+  paymentMethod: string | null; deliveryMethod: string; shippingAddress?: Record<string, string | null> | null;
   shippingQuoteStatus: 'NOT_REQUIRED' | 'PENDING' | 'QUOTED';
   shippingQuotedAt?: string | null; shippingQuoteNotes?: string | null;
-  customerNotes?: string | null; createdAt: string;
+  customerNotes?: string | null; internalNotes?: string | null; createdAt: string;
+  updatedAt?: string; expiresAt?: string | null; paidAt?: string | null;
   _count?: { items: number; shipments: number };
-  shipments?: Array<{ id: string; carrier: string; trackingNumber: string; status: string }>;
+  items?: AdminOrderItem[];
+  shipments?: Array<{
+    id: string;
+    carrier: string;
+    service?: string | null;
+    trackingNumber: string;
+    trackingUrl?: string | null;
+    status: string;
+    estimatedDeliveryAt?: string | null;
+  }>;
   payments?: Array<{
     id: string;
     method: string;
     status: string;
+    provider?: string;
+    amountCents?: number;
+    currency?: string;
+    providerPaymentId?: string | null;
+    providerPreferenceId?: string | null;
+    checkoutUrl?: string | null;
     transferProofs: Array<{
       id: string;
       fileName: string;
@@ -139,6 +156,38 @@ type AdminOrder = {
       createdAt: string;
     }>;
   }>;
+};
+
+type AdminOrderItem = {
+  id: string;
+  productName: string;
+  productSlug: string;
+  productLine: ProductLine;
+  variantName: string;
+  sku: string;
+  concentrationLabel?: string | null;
+  concentrationPercent?: string | number | null;
+  volumeMl?: number | null;
+  imageUrl?: string | null;
+  quantity: number;
+  unitPriceCents: number;
+  lineTotalCents: number;
+  variant?: {
+    attributes?: Record<string, unknown> | null;
+    product?: {
+      name: string;
+      shortDescription?: string | null;
+      description?: string | null;
+      attributes?: Record<string, unknown> | null;
+      brand?: { name: string } | null;
+      inspirationHouse?: { name: string } | null;
+      images?: Array<{ url: string; altText: string }>;
+      categories?: Array<{ category: { name: string } }>;
+      catalogLines?: Array<{
+        catalogLine: { name: string; section: { name: string } };
+      }>;
+    };
+  };
 };
 
 type AdminPromotion = {
@@ -253,6 +302,20 @@ function AdminWorkspace({ session, onLogout }: { session: AdminSession; onLogout
 
   function actionSuccess(message: string) { setNotice({ tone: 'success', message }); setModal(null); setSelected(null); setRefreshKey((value) => value + 1); }
   function open(nextModal: typeof modal, item?: typeof selected) { setSelected(item ?? null); setModal(nextModal); }
+  async function openOrderModal(
+    nextModal: 'delivery' | 'shipping-quote' | 'shipment',
+    order: AdminOrder,
+  ) {
+    setSelected(null);
+    setModal(nextModal);
+    try {
+      const detail = await request<AdminOrder>(`/admin/orders/${order.publicToken}`);
+      setSelected(detail);
+    } catch (error) {
+      setModal(null);
+      setNotice({ tone: 'error', message: errorMessage(error) });
+    }
+  }
 
   const visibleNav = session.user.role === 'ADMIN'
     ? nav
@@ -300,13 +363,13 @@ function AdminWorkspace({ session, onLogout }: { session: AdminSession; onLogout
               />
             </>}
             {tab === 'inventory' && <InventoryTab inventory={inventory} onAdjust={(item) => open('inventory', item)} />}
-            {tab === 'orders' && <OrdersTab orders={orders} onDelivery={(order) => open('delivery', order)} onQuote={(order) => open('shipping-quote', order)} onShipment={(order) => open('shipment', order)} request={request} onSuccess={actionSuccess} />}
+            {tab === 'orders' && <OrdersTab orders={orders} onDelivery={(order) => void openOrderModal('delivery', order)} onQuote={(order) => void openOrderModal('shipping-quote', order)} onShipment={(order) => void openOrderModal('shipment', order)} request={request} onSuccess={actionSuccess} />}
             {tab === 'promotions' && <PromotionsTab promotions={promotions} onCreate={() => open('promotion')} onEdit={(promotion) => open('promotion-edit', promotion)} request={request} onSuccess={actionSuccess} />}
             {tab === 'content' && <AdminSiteEditor onNotice={(tone, message) => setNotice({ tone, message })} request={request} />}
           </>}
         </div>
       </section>
-      {modal && <AdminModal title={modalTitle(modal)} onClose={() => setModal(null)}>
+      {modal && <AdminModal title={modalTitle(modal)} wide={['delivery', 'shipping-quote', 'shipment'].includes(modal)} onClose={() => { setModal(null); setSelected(null); }}>
         {modal === 'product' && <ProductForm brands={brands} categories={categories} navigation={catalogNavigation} perfumeHouses={perfumeHouses} request={request} onSuccess={actionSuccess} />}
         {modal === 'product-edit' && selected && <ProductEditForm product={selected as AdminProduct} brands={brands} categories={categories} navigation={catalogNavigation} perfumeHouses={perfumeHouses} request={request} onSuccess={actionSuccess} />}
         {modal === 'product-images' && selected && <ProductImagesForm product={selected as AdminProduct} request={request} onSuccess={actionSuccess} />}
@@ -317,6 +380,7 @@ function AdminWorkspace({ session, onLogout }: { session: AdminSession; onLogout
         {modal === 'shipping-quote' && selected && <ShippingQuoteForm order={selected as AdminOrder} request={request} onSuccess={actionSuccess} />}
         {modal === 'shipment' && selected && <ShipmentForm order={selected as AdminOrder} request={request} onSuccess={actionSuccess} />}
         {modal === 'delivery' && selected && <DeliveryDetails order={selected as AdminOrder} />}
+        {['delivery', 'shipping-quote', 'shipment'].includes(modal) && !selected && <AdminLoading />}
       </AdminModal>}
     </main>
   );
@@ -553,9 +617,19 @@ function OrdersTab({ orders, onDelivery, onQuote, onShipment, request, onSuccess
                 !isTerminal &&
                 order.payments?.[0]?.method === 'CASH' &&
                 ['PENDING', 'IN_PROCESS'].includes(order.paymentStatus);
+              const paymentAlreadyStarted = Boolean(
+                order.payments?.some(
+                  (payment) =>
+                    payment.providerPaymentId ||
+                    payment.providerPreferenceId ||
+                    payment.checkoutUrl,
+                ),
+              );
               const canQuoteShipping =
-                !isTerminal &&
-                order.deliveryMethod === 'SHIPPING' &&
+                order.status === 'PENDING_PAYMENT' &&
+                ['PENDING', 'REJECTED'].includes(order.paymentStatus) &&
+                order.deliveryMethod !== 'STORE_PICKUP' &&
+                !paymentAlreadyStarted &&
                 ['PENDING', 'QUOTED'].includes(order.shippingQuoteStatus);
               const canCreateShipment =
                 order.deliveryMethod !== 'STORE_PICKUP' &&
@@ -572,7 +646,7 @@ function OrdersTab({ orders, onDelivery, onQuote, onShipment, request, onSuccess
                       </span>
                       <div>
                         <strong>{order.number}</strong>
-                        <small>{formatDate(order.createdAt)}</small>
+                        <small>{formatDate(order.createdAt)} · {order._count?.items ?? 0} {order._count?.items === 1 ? 'producto' : 'productos'}</small>
                       </div>
                     </div>
                   </td>
@@ -610,7 +684,7 @@ function OrdersTab({ orders, onDelivery, onQuote, onShipment, request, onSuccess
                         onClick={() => onDelivery(order)}
                         type="button"
                       >
-                        <MapPin size={14} /> Entrega
+                        <Eye size={14} /> Ver pedido
                       </button>
                       {canQuoteShipping && (
                         <button
@@ -618,7 +692,7 @@ function OrdersTab({ orders, onDelivery, onQuote, onShipment, request, onSuccess
                           onClick={() => onQuote(order)}
                           type="button"
                         >
-                          <Truck size={14} /> {order.shippingQuoteStatus === 'PENDING' ? 'Cotizar envío' : 'Editar envío'}
+                          <Truck size={14} /> {order.shippingQuoteStatus === 'PENDING' ? 'Cotizar entrega' : 'Editar entrega'}
                         </button>
                       )}
                       {proof && (
@@ -1572,31 +1646,223 @@ const PAYMENT_METHOD_ADMIN_LABELS: Record<string, string> = {
   CASH: 'Efectivo al recoger',
 };
 
+const PRODUCT_ATTRIBUTE_LABELS: Record<string, string> = {
+  olfactoryFamily: 'Familia aromática',
+  familiaAromatica: 'Familia aromática',
+  fragranceFamily: 'Familia aromática',
+  olfactoryProfile: 'Perfil olfativo',
+  perfilOlfativo: 'Perfil olfativo',
+  importedFrom: 'Fuente del inventario',
+  sourceLine: 'Línea de origen',
+  inspiredByHouse: 'Casa de inspiración',
+  originalMeasure: 'Medida original',
+  sourcePriceCents: 'Precio de origen',
+};
+
+function attributeText(
+  attributes: Record<string, unknown> | null | undefined,
+  keys: string[],
+) {
+  for (const key of keys) {
+    const value = attributes?.[key];
+    if (typeof value === 'string' && value.trim()) return value.trim();
+  }
+  return null;
+}
+
+function readableAttributeLabel(key: string) {
+  return PRODUCT_ATTRIBUTE_LABELS[key]
+    ?? key
+      .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+      .replace(/[_-]+/g, ' ')
+      .replace(/^./, (letter) => letter.toUpperCase());
+}
+
+function readableAttributeValue(key: string, value: unknown, currency: string) {
+  if (key.toLowerCase().endsWith('pricecents') && typeof value === 'number') {
+    return formatMoney(value, currency);
+  }
+  if (typeof value === 'boolean') return value ? 'Sí' : 'No';
+  if (typeof value === 'string' || typeof value === 'number') return String(value);
+  if (Array.isArray(value) && value.every((entry) => ['string', 'number'].includes(typeof entry))) {
+    return value.join(', ');
+  }
+  return null;
+}
+
+function productAttributeEntries(item: AdminOrderItem, currency: string) {
+  const attributes = {
+    ...(item.variant?.product?.attributes ?? {}),
+    ...(item.variant?.attributes ?? {}),
+  };
+  const familyKeys = new Set([
+    'olfactoryFamily',
+    'familiaAromatica',
+    'fragranceFamily',
+    'olfactoryProfile',
+    'perfilOlfativo',
+  ]);
+  return Object.entries(attributes).flatMap(([key, value]) => {
+    if (familyKeys.has(key)) return [];
+    const displayValue = readableAttributeValue(key, value, currency);
+    return displayValue ? [{ key, label: readableAttributeLabel(key), value: displayValue }] : [];
+  });
+}
+
+function ProductOrderDetail({ item, currency }: { item: AdminOrderItem; currency: string }) {
+  const product = item.variant?.product;
+  const image = item.imageUrl ?? product?.images?.[0]?.url;
+  const family = attributeText(product?.attributes, [
+    'olfactoryFamily',
+    'familiaAromatica',
+    'fragranceFamily',
+  ]) ?? attributeText(item.variant?.attributes, [
+    'olfactoryFamily',
+    'familiaAromatica',
+    'fragranceFamily',
+  ]);
+  const profile = attributeText(product?.attributes, ['olfactoryProfile', 'perfilOlfativo'])
+    ?? attributeText(item.variant?.attributes, ['olfactoryProfile', 'perfilOlfativo']);
+  const categories = product?.categories?.map((entry) => entry.category.name) ?? [];
+  const catalogLines = product?.catalogLines?.map(
+    (entry) => `${entry.catalogLine.section.name} · ${entry.catalogLine.name}`,
+  ) ?? [];
+  const attributes = productAttributeEntries(item, currency);
+  const concentration = [
+    item.concentrationLabel,
+    item.concentrationPercent !== null && item.concentrationPercent !== undefined
+      ? `${Number(item.concentrationPercent)}%`
+      : null,
+  ].filter((value, index, values) => value && values.indexOf(value) === index).join(' · ');
+
+  return (
+    <article className="adminOrderProduct">
+      <div className="adminOrderProduct__main">
+        <div className="adminOrderProduct__image">
+          {image
+            ? <Image alt={product?.images?.[0]?.altText || item.productName} fill sizes="96px" src={image} unoptimized={image.startsWith('http')} />
+            : <Package aria-hidden="true" size={28} />}
+          <strong aria-label={`Cantidad ${item.quantity}`}>{item.quantity}</strong>
+        </div>
+        <div className="adminOrderProduct__identity">
+          <span>{product?.brand?.name ?? 'Marca no registrada'}</span>
+          <h3>{item.productName}</h3>
+          <p>{product?.shortDescription || item.variantName}</p>
+          <div>
+            <span>{item.variantName}</span>
+            <span>{item.sku}</span>
+          </div>
+        </div>
+        <div className="adminOrderProduct__total">
+          <small>{formatMoney(item.unitPriceCents, currency)} c/u</small>
+          <strong>{formatMoney(item.lineTotalCents, currency)}</strong>
+        </div>
+      </div>
+
+      <dl className="adminOrderProduct__facts">
+        <div><dt>Cantidad a preparar</dt><dd><strong>{item.quantity} {item.quantity === 1 ? 'unidad' : 'unidades'}</strong></dd></div>
+        <div><dt>Presentación</dt><dd>{item.variantName}</dd></div>
+        <div><dt>SKU</dt><dd>{item.sku}</dd></div>
+        <div><dt>Volumen</dt><dd>{item.volumeMl ? `${item.volumeMl} ml` : 'No aplica'}</dd></div>
+        <div><dt>Concentración</dt><dd>{concentration || 'No aplica'}</dd></div>
+        <div><dt>Línea comercial</dt><dd>{LINE_LABELS[item.productLine] ?? item.productLine}</dd></div>
+        <div><dt>Marca</dt><dd>{product?.brand?.name ?? 'No registrada'}</dd></div>
+        <div><dt>Inspirado en</dt><dd>{product?.inspirationHouse?.name ?? 'No aplica'}</dd></div>
+        <div><dt>Familia aromática</dt><dd>{family ?? 'No registrada en el catálogo'}</dd></div>
+        <div><dt>Categorías</dt><dd>{categories.join(', ') || 'Sin categorías'}</dd></div>
+        <div className="adminOrderProduct__wide"><dt>Ubicación en catálogo</dt><dd>{catalogLines.join(' · ') || 'Sin ubicación registrada'}</dd></div>
+      </dl>
+
+      {(product?.description || profile) && (
+        <section className="adminOrderProduct__aroma">
+          <strong>Descripción y notas olfativas</strong>
+          {profile && <p><b>Perfil:</b> {profile}</p>}
+          {product?.description && <p>{product.description}</p>}
+        </section>
+      )}
+
+      {attributes.length > 0 && (
+        <section className="adminOrderProduct__attributes">
+          <strong>Datos adicionales del catálogo</strong>
+          <dl>
+            {attributes.map((attribute) => (
+              <div key={attribute.key}><dt>{attribute.label}</dt><dd>{attribute.value}</dd></div>
+            ))}
+          </dl>
+        </section>
+      )}
+    </article>
+  );
+}
+
 function DeliverySummary({ order }: { order: AdminOrder }) {
   const address = order.shippingAddress;
-  return <section className="adminDeliverySummary">
-    <div className="adminDeliverySummary__method">
-      {order.deliveryMethod === 'STORE_PICKUP' ? <Store size={18} /> : <Truck size={18} />}
-      <div><small>Modalidad</small><strong>{DELIVERY_METHOD_LABELS[order.deliveryMethod] ?? order.deliveryMethod}</strong></div>
-    </div>
-    <dl>
-      <div><dt><CreditCard size={14} /> Pago</dt><dd>{PAYMENT_METHOD_ADMIN_LABELS[order.paymentMethod] ?? order.paymentMethod}</dd></div>
-      <div><dt><Mail size={14} /> Correo</dt><dd>{order.customerEmail || 'No registrado'}</dd></div>
-      <div><dt><Phone size={14} /> Teléfono</dt><dd>{order.customerPhone || String(address?.phone ?? '') || 'No registrado'}</dd></div>
-      {address && <>
-        <div><dt><MapPin size={14} /> Recibe</dt><dd>{String(address.recipientName ?? order.customerName)}</dd></div>
-        <div className="adminDeliverySummary__wide"><dt>Dirección</dt><dd>{String(address.street ?? '')} {String(address.exteriorNumber ?? '')}{address.interiorNumber ? `, Int. ${String(address.interiorNumber)}` : ''}<br />{String(address.neighborhood ?? '')}, {String(address.city ?? '')}{address.municipality ? `, ${String(address.municipality)}` : ''}<br />{String(address.state ?? '')}, C.P. {String(address.postalCode ?? '')}, {String(address.country ?? 'MX')}</dd></div>
-        {address.reference && <div className="adminDeliverySummary__wide"><dt>Referencias</dt><dd>{String(address.reference)}</dd></div>}
-      </>}
-      {order.customerNotes && <div className="adminDeliverySummary__wide"><dt>Nota del cliente</dt><dd>{order.customerNotes}</dd></div>}
-      <div><dt>Subtotal</dt><dd>{formatMoney(order.subtotalCents, order.currency)}</dd></div>
-      {order.discountCents > 0 && <div><dt>Descuento</dt><dd>− {formatMoney(order.discountCents, order.currency)}</dd></div>}
-      <div><dt>Envío</dt><dd>{order.shippingQuoteStatus === 'PENDING' ? 'Pendiente de cotización' : formatMoney(order.shippingCents, order.currency)}</dd></div>
-      <div><dt>Total</dt><dd><strong>{formatMoney(order.totalCents, order.currency)}</strong></dd></div>
-      {order.shippingQuoteNotes && <div className="adminDeliverySummary__wide"><dt>Nota de cotización</dt><dd>{order.shippingQuoteNotes}</dd></div>}
-    </dl>
-    {order.deliveryMethod !== 'STORE_PICKUP' && !address && <p className="adminDeliverySummary__warning"><AlertTriangle size={15} /> Este pedido no tiene una dirección guardada. Revísalo antes de preparar el envío.</p>}
-  </section>;
+  const payment = order.payments?.[0];
+  return (
+    <section className="adminOrderDetail">
+      <section className="adminDeliverySummary">
+        <div className="adminDeliverySummary__method">
+          {order.deliveryMethod === 'STORE_PICKUP' ? <Store size={18} /> : <Truck size={18} />}
+          <div>
+            <small>Modalidad de entrega</small>
+            <strong>{DELIVERY_METHOD_LABELS[order.deliveryMethod] ?? order.deliveryMethod}</strong>
+          </div>
+          <span>{order.number}</span>
+        </div>
+        <dl>
+          <div><dt><Package size={14} /> Pedido creado</dt><dd>{formatDate(order.createdAt)}</dd></div>
+          <div><dt>Preparación</dt><dd>{ORDER_STATUS_LABELS[order.status] ?? order.status}</dd></div>
+          <div><dt><CreditCard size={14} /> Método de pago</dt><dd>{order.paymentMethod ? (PAYMENT_METHOD_ADMIN_LABELS[order.paymentMethod] ?? order.paymentMethod) : 'Pendiente de elección del cliente'}</dd></div>
+          <div><dt>Estado del pago</dt><dd>{PAYMENT_STATUS_LABELS[order.paymentStatus] ?? order.paymentStatus}</dd></div>
+          {payment?.provider && <div><dt>Pasarela</dt><dd>{payment.provider.replaceAll('_', ' ')}</dd></div>}
+          {payment?.providerPaymentId && <div><dt>Referencia de pago</dt><dd>{payment.providerPaymentId}</dd></div>}
+          <div><dt><Mail size={14} /> Correo</dt><dd>{order.customerEmail || 'No registrado'}</dd></div>
+          <div><dt><Phone size={14} /> Teléfono</dt><dd>{order.customerPhone || String(address?.phone ?? '') || 'No registrado'}</dd></div>
+          {address && <>
+            <div><dt><MapPin size={14} /> Persona que recibe</dt><dd>{String(address.recipientName ?? order.customerName)}</dd></div>
+            <div><dt>Teléfono de entrega</dt><dd>{String(address.phone ?? order.customerPhone ?? 'No registrado')}</dd></div>
+            <div className="adminDeliverySummary__wide"><dt>Dirección completa</dt><dd>{String(address.street ?? '')} {String(address.exteriorNumber ?? '')}{address.interiorNumber ? `, Int. ${String(address.interiorNumber)}` : ''}<br />{String(address.neighborhood ?? '')}, {String(address.city ?? '')}{address.municipality ? `, ${String(address.municipality)}` : ''}<br />{String(address.state ?? '')}, C.P. {String(address.postalCode ?? '')}, {String(address.country ?? 'MX')}</dd></div>
+            {address.reference && <div className="adminDeliverySummary__wide"><dt>Referencias para encontrar el domicilio</dt><dd>{String(address.reference)}</dd></div>}
+          </>}
+          {order.customerNotes && <div className="adminDeliverySummary__wide adminDeliverySummary__note"><dt>Indicaciones del cliente</dt><dd>{order.customerNotes}</dd></div>}
+          {order.internalNotes && <div className="adminDeliverySummary__wide"><dt>Notas internas</dt><dd>{order.internalNotes}</dd></div>}
+          <div><dt>Subtotal de productos</dt><dd>{formatMoney(order.subtotalCents, order.currency)}</dd></div>
+          {order.discountCents > 0 && <div><dt>Descuento</dt><dd>− {formatMoney(order.discountCents, order.currency)}</dd></div>}
+          <div><dt>Costo de entrega</dt><dd>{order.shippingQuoteStatus === 'PENDING' ? 'Pendiente de cotización' : formatMoney(order.shippingCents, order.currency)}</dd></div>
+          <div><dt>Total del pedido</dt><dd><strong>{formatMoney(order.totalCents, order.currency)}</strong></dd></div>
+          {order.shippingQuoteNotes && <div className="adminDeliverySummary__wide"><dt>Nota de cotización</dt><dd>{order.shippingQuoteNotes}</dd></div>}
+        </dl>
+        {order.deliveryMethod !== 'STORE_PICKUP' && !address && <p className="adminDeliverySummary__warning"><AlertTriangle size={15} /> Este pedido no tiene una dirección guardada. Revísalo antes de preparar el envío.</p>}
+      </section>
+
+      <section className="adminOrderProducts">
+        <header>
+          <div>
+            <span className="adminEyebrow">Lista de preparación</span>
+            <h3>Productos que se deben enviar</h3>
+          </div>
+          <strong>{order.items?.reduce((total, item) => total + item.quantity, 0) ?? order._count?.items ?? 0} unidades</strong>
+        </header>
+        {order.items?.length
+          ? order.items.map((item) => <ProductOrderDetail currency={order.currency} item={item} key={item.id} />)
+          : <div className="adminOrderProducts__empty"><AlertTriangle size={17} /> No fue posible cargar las partidas de este pedido.</div>}
+      </section>
+
+      {order.shipments && order.shipments.length > 0 && (
+        <section className="adminOrderShipments">
+          <span className="adminEyebrow">Seguimiento</span>
+          <h3>Guías registradas</h3>
+          {order.shipments.map((shipment) => (
+            <article key={shipment.id}>
+              <Truck size={17} />
+              <div><strong>{shipment.carrier}{shipment.service ? ` · ${shipment.service}` : ''}</strong><small>{shipment.trackingNumber}</small></div>
+              <span>{FULFILLMENT_STATUS_LABELS[shipment.status] ?? shipment.status}</span>
+            </article>
+          ))}
+        </section>
+      )}
+    </section>
+  );
 }
 
 function ShippingQuoteForm({ order, request, onSuccess }: { order: AdminOrder; request: AdminRequest; onSuccess: (message: string) => void }) {
@@ -1629,7 +1895,7 @@ function ShippingQuoteForm({ order, request, onSuccess }: { order: AdminOrder; r
   }
 
   return <form className="adminForm" onSubmit={submit}>
-    <div className="adminFormContext"><Truck size={19} /><div><strong>{order.number}</strong><small>{order.customerName} · envío nacional</small></div></div>
+    <div className="adminFormContext"><Truck size={19} /><div><strong>{order.number}</strong><small>{order.customerName} · {DELIVERY_METHOD_LABELS[order.deliveryMethod] ?? order.deliveryMethod}</small></div></div>
     <DeliverySummary order={order} />
     <div className="adminFormDivider"><span>Cotización para el cliente</span></div>
     <AdminField label="Costo de envío MXN" description="Este importe se sumará al total antes de habilitar el pago.">
@@ -1688,10 +1954,10 @@ function ShipmentForm({ order, request, onSuccess }: { order: AdminOrder; reques
   </form>;
 }
 
-function AdminModal({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) { return <div className="adminModal"><button aria-label="Cerrar" className="adminModal__backdrop" onClick={onClose} type="button" /><section><header><div><span className="adminEyebrow">Operación segura</span><h2>{title}</h2></div><button aria-label="Cerrar" onClick={onClose} type="button"><X size={19} /></button></header>{children}</section></div>; }
+function AdminModal({ title, onClose, children, wide = false }: { title: string; onClose: () => void; children: React.ReactNode; wide?: boolean }) { return <div className={`adminModal ${wide ? 'adminModal--wide' : ''}`}><button aria-label="Cerrar" className="adminModal__backdrop" onClick={onClose} type="button" /><section><header><div><span className="adminEyebrow">Operación segura</span><h2>{title}</h2></div><button aria-label="Cerrar" onClick={onClose} type="button"><X size={19} /></button></header>{children}</section></div>; }
 function AdminHeading({ eyebrow, title, description, action }: { eyebrow: string; title: string; description: string; action?: React.ReactNode }) { return <div className="adminPageHeading"><div><span className="adminEyebrow">{eyebrow}</span><h1>{title}</h1><p>{description}</p></div>{action}</div>; }
 function AdminSearch({ value, onChange, placeholder }: { value: string; onChange: (value: string) => void; placeholder: string }) { return <label className="adminSearch"><Search size={16} /><input onChange={(event) => onChange(event.target.value)} placeholder={placeholder} value={value} />{value && <button aria-label="Limpiar" onClick={() => onChange('')} type="button"><X size={14} /></button>}</label>; }
 function AdminField({ label, description, children }: { label: string; description?: string; children: React.ReactNode }) { return <label className="adminField"><span>{label}</span>{description && <small>{description}</small>}{children}</label>; }
 function Metric({ icon: Icon, label, value, note, tone }: { icon: typeof BarChart3; label: string; value: string; note: string; tone: string }) { return <article className={`adminMetric adminMetric--${tone}`}><span><Icon size={19} /></span><small>{label}</small><strong>{value}</strong><p>{note}</p></article>; }
 function AdminLoading() { return <div className="adminLoading"><span /><div>{Array.from({ length: 4 }, (_, index) => <i key={index} />)}</div><b /></div>; }
-function modalTitle(modal: string) { return ({ product: 'Nuevo producto', 'product-edit': 'Editar producto', 'product-images': 'Fotografías del producto', inventory: 'Ajustar inventario', promotion: 'Nueva promoción', 'promotion-edit': 'Editar promoción', 'shipping-quote': 'Cotizar envío', shipment: 'Registrar guía', delivery: 'Datos de entrega', price: 'Actualizar precio' } as Record<string, string>)[modal] ?? 'Administrar'; }
+function modalTitle(modal: string) { return ({ product: 'Nuevo producto', 'product-edit': 'Editar producto', 'product-images': 'Fotografías del producto', inventory: 'Ajustar inventario', promotion: 'Nueva promoción', 'promotion-edit': 'Editar promoción', 'shipping-quote': 'Cotizar envío', shipment: 'Registrar guía', delivery: 'Pedido completo', price: 'Actualizar precio' } as Record<string, string>)[modal] ?? 'Administrar'; }

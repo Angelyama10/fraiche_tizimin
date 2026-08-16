@@ -10,6 +10,7 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
+  DeliveryMethod,
   OrderStatus,
   Payment,
   PaymentMethod,
@@ -31,6 +32,7 @@ import {
   ProcessMercadoPagoCardDto,
 } from './payment.dto';
 import { PrismaService } from './prisma.service';
+import { isShippingQuoteReadyForPayment } from './shipping-quote';
 
 type MercadoPagoPreference = {
   id: string;
@@ -116,9 +118,7 @@ export class PaymentsService {
     if (order.paymentMethod !== PaymentMethod.PAYMENT_LINK) {
       throw new BadRequestException('La orden no usa link de Mercado Pago.');
     }
-    if (order.paymentStatus === PaymentStatus.APPROVED) {
-      throw new ConflictException('La orden ya esta pagada.');
-    }
+    this.assertOrderAcceptsPayment(order);
 
     const payment = order.payments.find(
       (entry) =>
@@ -127,6 +127,9 @@ export class PaymentsService {
         !this.isSupersededPaymentStatus(entry.status),
     );
     if (!payment) throw new NotFoundException('Registro de pago no encontrado.');
+    if (payment.amountCents !== order.totalCents || payment.currency !== order.currency) {
+      throw new ConflictException('El importe del pago no coincide con el total de la orden.');
+    }
     if (payment.checkoutUrl) {
       return {
         preferenceId: payment.providerPreferenceId,
@@ -143,17 +146,16 @@ export class PaymentsService {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        items: order.items.map((item) => ({
-          id: item.sku,
-          title: `${item.productName} - ${item.variantName}`,
-          description: [item.concentrationLabel, item.volumeMl ? `${item.volumeMl} ml` : null]
-            .filter(Boolean)
-            .join(' '),
-          picture_url: item.imageUrl ?? undefined,
-          quantity: item.quantity,
-          currency_id: order.currency,
-          unit_price: item.unitPriceCents / 100,
-        })),
+        items: [
+          {
+            id: order.number,
+            title: `Pedido ${order.number}`,
+            description: `${order.items.reduce((total, item) => total + item.quantity, 0)} producto(s), envío y descuentos incluidos`,
+            quantity: 1,
+            currency_id: order.currency,
+            unit_price: order.totalCents / 100,
+          },
+        ],
         payer: {
           name: order.customerName,
           email: order.customerEmail,
@@ -469,6 +471,7 @@ export class PaymentsService {
       throw new NotFoundException('Orden de transferencia no encontrada.');
     }
     this.assertShippingQuoteReady(order);
+    this.assertOrderAcceptsPayment(order);
     if (!input.objectKey.startsWith(`transfer-proofs/${order.id}/`)) {
       throw new BadRequestException('El comprobante no pertenece a esta orden.');
     }
@@ -1132,6 +1135,9 @@ export class PaymentsService {
     if (order.status === OrderStatus.CANCELLED || order.status === OrderStatus.EXPIRED) {
       throw new ConflictException('La reserva de la orden ya no esta activa.');
     }
+    if (order.expiresAt && order.expiresAt <= new Date()) {
+      throw new ConflictException('La reserva de la orden ya vencio.');
+    }
 
     const reservations = await transaction.inventoryReservation.findMany({
       where: { orderItem: { orderId }, status: ReservationStatus.ACTIVE },
@@ -1230,11 +1236,30 @@ export class PaymentsService {
     return order;
   }
 
-  private assertShippingQuoteReady(order: { shippingQuoteStatus: ShippingQuoteStatus }) {
-    if (order.shippingQuoteStatus === ShippingQuoteStatus.PENDING) {
+  private assertShippingQuoteReady(order: {
+    deliveryMethod: DeliveryMethod;
+    shippingQuoteStatus: ShippingQuoteStatus;
+  }) {
+    if (!isShippingQuoteReadyForPayment(order.deliveryMethod, order.shippingQuoteStatus)) {
       throw new ConflictException(
-        'Estamos calculando el envio. Podras pagar cuando la tienda confirme el importe.',
+        'La tienda debe confirmar el costo de entrega antes de habilitar el pago.',
       );
+    }
+  }
+
+  private assertOrderAcceptsPayment(order: {
+    status: OrderStatus;
+    paymentStatus: PaymentStatus;
+    expiresAt: Date | null;
+  }) {
+    if (order.paymentStatus === PaymentStatus.APPROVED) {
+      throw new ConflictException('La orden ya esta pagada.');
+    }
+    if (order.status !== OrderStatus.PENDING_PAYMENT) {
+      throw new ConflictException('La reserva de la orden ya no esta activa.');
+    }
+    if (order.expiresAt && order.expiresAt <= new Date()) {
+      throw new ConflictException('La reserva de la orden ya vencio.');
     }
   }
 

@@ -41,6 +41,10 @@ import {
   type CheckoutStep,
 } from '@/lib/checkout-draft';
 import { formatMoney } from '@/lib/format';
+import {
+  shippingAddressIssue,
+  toShippingAddressPayload,
+} from '@/lib/shipping-address';
 import type { CustomerAddress, Order } from '@/lib/types';
 import { useAuth } from '@/providers/auth-provider';
 import { useCart } from '@/providers/cart-provider';
@@ -68,10 +72,16 @@ const payments: Array<{
   { id: 'CASH', title: 'Efectivo', note: 'Al recoger', icon: Banknote },
 ];
 
-const flowSteps: Array<{ id: CheckoutStep; label: string; shortLabel: string }> = [
+const paymentFlowSteps: Array<{ id: CheckoutStep; label: string; shortLabel: string }> = [
   { id: 'review', label: 'Revisa tu compra', shortLabel: 'Revisión' },
   { id: 'delivery', label: 'Elige la entrega', shortLabel: 'Entrega' },
   { id: 'payment', label: 'Define cómo pagar', shortLabel: 'Método' },
+];
+
+const quoteFlowSteps: Array<{ id: CheckoutStep; label: string; shortLabel: string }> = [
+  { id: 'review', label: 'Revisa tu compra', shortLabel: 'Revisión' },
+  { id: 'delivery', label: 'Elige la entrega', shortLabel: 'Entrega' },
+  { id: 'payment', label: 'Solicita la cotización', shortLabel: 'Cotización' },
 ];
 
 export function CheckoutExperience() {
@@ -81,6 +91,8 @@ export function CheckoutExperience() {
     useCart();
   const notify = useNotify();
   const initializedCart = useRef<string | null>(null);
+  const submittingOrder = useRef(false);
+  const orderIdempotencyKey = useRef<string | null>(null);
   const [step, setStep] = useState<CheckoutStep>('review');
   const [draftReady, setDraftReady] = useState(false);
   const [addresses, setAddresses] = useState<CustomerAddress[]>([]);
@@ -161,6 +173,8 @@ export function CheckoutExperience() {
     const cartToken = cart?.publicToken;
     if (!cartToken || initializedCart.current === cartToken) return;
     initializedCart.current = cartToken;
+    submittingOrder.current = false;
+    orderIdempotencyKey.current = null;
     setDraftReady(false);
     const saved = loadCheckoutDraft(cartToken);
     const requestedStep = readStepFromUrl();
@@ -224,9 +238,16 @@ export function CheckoutExperience() {
       : paymentMethod === 'PAYMENT_LINK'
         ? gatewayConfiguration?.mercadoPago.linkEnabled
         : true;
+  const requiresShippingQuote = deliveryMethod !== 'STORE_PICKUP';
+  const flowSteps = requiresShippingQuote ? quoteFlowSteps : paymentFlowSteps;
   const canCheckout = useMemo(
-    () => Boolean(cart?.items.length && auth.status === 'authenticated' && gatewayAvailable),
-    [auth.status, cart?.items.length, gatewayAvailable],
+    () =>
+      Boolean(
+        cart?.items.length &&
+          auth.status === 'authenticated' &&
+          (requiresShippingQuote || gatewayAvailable),
+      ),
+    [auth.status, cart?.items.length, gatewayAvailable, requiresShippingQuote],
   );
   const activeStepIndex = flowSteps.findIndex((item) => item.id === step);
 
@@ -297,7 +318,7 @@ export function CheckoutExperience() {
   async function placeOrder(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!cart) return;
-    if (!canCheckout) return;
+    if (!canCheckout || submittingOrder.current) return;
     const issue = deliveryIssue(deliveryMethod, newAddress, addressId, address);
     if (issue) {
       notify({ title: 'Revisa la entrega', description: issue, tone: 'info' });
@@ -307,33 +328,24 @@ export function CheckoutExperience() {
 
     const shippingAddress =
       newAddress && deliveryMethod !== 'STORE_PICKUP'
-        ? {
-            ...address,
-            recipientName: address.recipientName.trim(),
-            phone: address.phone.trim(),
-            street: address.street.trim(),
-            exteriorNumber: address.exteriorNumber.trim(),
-            interiorNumber: address.interiorNumber.trim() || undefined,
-            neighborhood: address.neighborhood.trim(),
-            city: address.city.trim(),
-            municipality: address.municipality.trim() || undefined,
-            state: address.state.trim(),
-            postalCode: address.postalCode.trim(),
-            country: 'MX',
-            reference: address.reference.trim() || undefined,
-          }
+        ? toShippingAddressPayload(address)
         : undefined;
 
+    submittingOrder.current = true;
     setPlacing(true);
     setPaymentError(null);
     try {
+      orderIdempotencyKey.current ??= crypto.randomUUID();
       const order = await auth.request<Order>('/orders', {
         method: 'POST',
-        headers: { 'Idempotency-Key': crypto.randomUUID() },
+        headers: { 'Idempotency-Key': orderIdempotencyKey.current },
         body: JSON.stringify({
           cartToken: cart.publicToken,
-          paymentMethod,
-          paymentProvider: paymentMethod === 'CARD' ? paymentProvider : undefined,
+          paymentMethod: requiresShippingQuote ? undefined : paymentMethod,
+          paymentProvider:
+            !requiresShippingQuote && paymentMethod === 'CARD'
+              ? paymentProvider
+              : undefined,
           deliveryMethod,
           shippingAddressId:
             !newAddress && deliveryMethod !== 'STORE_PICKUP' ? addressId : undefined,
@@ -344,6 +356,11 @@ export function CheckoutExperience() {
       });
       clearCheckoutDraft(cart.publicToken);
       resetCart();
+
+      if (order.shippingQuoteStatus === 'PENDING') {
+        router.push(`/pago/${order.publicToken}`);
+        return;
+      }
 
       if (paymentMethod === 'CARD') {
         router.push(`/pago/${order.publicToken}`);
@@ -373,6 +390,7 @@ export function CheckoutExperience() {
         tone: 'error',
       });
     } finally {
+      submittingOrder.current = false;
       setPlacing(false);
     }
   }
@@ -530,14 +548,14 @@ export function CheckoutExperience() {
                   active={deliveryMethod === 'SHIPPING'}
                   icon={Truck}
                   label="Envío nacional"
-                  note="Con código de rastreo"
+                  note="Fuera de Tizimín · cotizamos antes de pagar"
                   onClick={() => chooseDelivery('SHIPPING')}
                 />
                 <Choice
                   active={deliveryMethod === 'LOCAL_DELIVERY'}
                   icon={MapPin}
                   label="Entrega local"
-                  note="Tizimín y zona cercana"
+                  note="Tizimín y zona cercana · cotizamos antes de pagar"
                   onClick={() => chooseDelivery('LOCAL_DELIVERY')}
                 />
                 <Choice
@@ -600,87 +618,112 @@ export function CheckoutExperience() {
                 <div className="checkoutSection__heading">
                   <span>03</span>
                   <div>
-                    <h2>Elige cómo pagar</h2>
-                    <p>La tarjeta se captura únicamente en la pantalla segura siguiente.</p>
+                    <h2>
+                      {requiresShippingQuote
+                        ? 'Confirma y solicita la cotización'
+                        : 'Elige cómo pagar'}
+                    </h2>
+                    <p>
+                      {requiresShippingQuote
+                        ? 'Primero reservamos tus productos y la tienda calcula el envío exacto.'
+                        : 'La tarjeta se captura únicamente en la pantalla segura siguiente.'}
+                    </p>
                   </div>
                 </div>
-                <div className="choiceGrid choiceGrid--payments">
-                  {payments.map((payment) => (
-                    <Choice
-                      active={paymentMethod === payment.id}
-                      disabled={
-                        payment.id === 'PAYMENT_LINK' &&
-                        (gatewayConfiguration
-                          ? !gatewayConfiguration.mercadoPago.linkEnabled
-                          : true)
-                      }
-                      icon={payment.icon}
-                      key={payment.id}
-                      label={payment.title}
-                      note={
-                        payment.id === 'PAYMENT_LINK' &&
-                        gatewayConfiguration &&
-                        !gatewayConfiguration.mercadoPago.linkEnabled
-                          ? 'Temporalmente no disponible'
-                          : payment.note
-                      }
-                      onClick={() => setPaymentMethod(payment.id)}
-                    />
-                  ))}
-                </div>
-                {paymentMethod === 'CARD' && (
-                  <div className="gatewayPicker" aria-label="Pasarela para tarjeta">
-                    <button
-                      className={paymentProvider === 'MERCADO_PAGO' ? 'isActive' : ''}
-                      disabled={
-                        gatewayConfiguration
-                          ? !gatewayConfiguration.mercadoPago.cardEnabled
-                          : true
-                      }
-                      onClick={() => setPaymentProvider('MERCADO_PAGO')}
-                      type="button"
-                    >
-                      <span className="gatewayPicker__mark gatewayPicker__mark--mp">MP</span>
-                      <span>
-                        <strong>Mercado Pago</strong>
-                        <small>Crédito, débito y meses disponibles</small>
-                      </span>
-                      {paymentProvider === 'MERCADO_PAGO' && <Check size={15} />}
-                    </button>
-                    <button
-                      className={paymentProvider === 'STRIPE' ? 'isActive' : ''}
-                      disabled={
-                        gatewayConfiguration ? !gatewayConfiguration.stripe.enabled : true
-                      }
-                      onClick={() => setPaymentProvider('STRIPE')}
-                      type="button"
-                    >
-                      <span className="gatewayPicker__mark gatewayPicker__mark--stripe">S</span>
-                      <span>
-                        <strong>Stripe</strong>
-                        <small>Tarjetas y autenticación bancaria</small>
-                      </span>
-                      {paymentProvider === 'STRIPE' && <Check size={15} />}
-                    </button>
-                    {gatewayConfiguration &&
-                      !gatewayConfiguration.mercadoPago.cardEnabled &&
-                      !gatewayConfiguration.stripe.enabled && (
-                        <p>La tienda está terminando de configurar el pago con tarjeta.</p>
-                      )}
-                  </div>
-                )}
-                {instruction && (
-                  <div className="paymentInstruction">
-                    <Landmark aria-hidden="true" size={18} />
+                {requiresShippingQuote ? (
+                  <div className="quoteRequestCard">
+                    <span><Truck aria-hidden="true" size={22} /></span>
                     <div>
-                      <strong>{instruction.title}</strong>
-                      {paymentMethod === 'BANK_TRANSFER' ? (
-                        <BankTransferDetails instruction={instruction} />
-                      ) : (
-                        <p>{instruction.instructions}</p>
-                      )}
+                      <strong>El pago todavía no se inicia.</strong>
+                      <p>
+                        Administración recibirá la dirección, los productos y sus cantidades.
+                        Cuando agregue el costo de entrega, podrás elegir la forma de pago y abrir
+                        la pasarela con el total final.
+                      </p>
                     </div>
+                    <CheckCircle2 aria-hidden="true" size={20} />
                   </div>
+                ) : (
+                  <>
+                    <div className="choiceGrid choiceGrid--payments">
+                      {payments.map((payment) => (
+                        <Choice
+                          active={paymentMethod === payment.id}
+                          disabled={
+                            payment.id === 'PAYMENT_LINK' &&
+                            (gatewayConfiguration
+                              ? !gatewayConfiguration.mercadoPago.linkEnabled
+                              : true)
+                          }
+                          icon={payment.icon}
+                          key={payment.id}
+                          label={payment.title}
+                          note={
+                            payment.id === 'PAYMENT_LINK' &&
+                            gatewayConfiguration &&
+                            !gatewayConfiguration.mercadoPago.linkEnabled
+                              ? 'Temporalmente no disponible'
+                              : payment.note
+                          }
+                          onClick={() => setPaymentMethod(payment.id)}
+                        />
+                      ))}
+                    </div>
+                    {paymentMethod === 'CARD' && (
+                      <div className="gatewayPicker" aria-label="Pasarela para tarjeta">
+                        <button
+                          className={paymentProvider === 'MERCADO_PAGO' ? 'isActive' : ''}
+                          disabled={
+                            gatewayConfiguration
+                              ? !gatewayConfiguration.mercadoPago.cardEnabled
+                              : true
+                          }
+                          onClick={() => setPaymentProvider('MERCADO_PAGO')}
+                          type="button"
+                        >
+                          <span className="gatewayPicker__mark gatewayPicker__mark--mp">MP</span>
+                          <span>
+                            <strong>Mercado Pago</strong>
+                            <small>Crédito, débito y meses disponibles</small>
+                          </span>
+                          {paymentProvider === 'MERCADO_PAGO' && <Check size={15} />}
+                        </button>
+                        <button
+                          className={paymentProvider === 'STRIPE' ? 'isActive' : ''}
+                          disabled={
+                            gatewayConfiguration ? !gatewayConfiguration.stripe.enabled : true
+                          }
+                          onClick={() => setPaymentProvider('STRIPE')}
+                          type="button"
+                        >
+                          <span className="gatewayPicker__mark gatewayPicker__mark--stripe">S</span>
+                          <span>
+                            <strong>Stripe</strong>
+                            <small>Tarjetas y autenticación bancaria</small>
+                          </span>
+                          {paymentProvider === 'STRIPE' && <Check size={15} />}
+                        </button>
+                        {gatewayConfiguration &&
+                          !gatewayConfiguration.mercadoPago.cardEnabled &&
+                          !gatewayConfiguration.stripe.enabled && (
+                            <p>La tienda está terminando de configurar el pago con tarjeta.</p>
+                          )}
+                      </div>
+                    )}
+                    {instruction && (
+                      <div className="paymentInstruction">
+                        <Landmark aria-hidden="true" size={18} />
+                        <div>
+                          <strong>{instruction.title}</strong>
+                          {paymentMethod === 'BANK_TRANSFER' ? (
+                            <BankTransferDetails instruction={instruction} />
+                          ) : (
+                            <p>{instruction.instructions}</p>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </>
                 )}
               </section>
 
@@ -735,11 +778,15 @@ export function CheckoutExperience() {
             </span>
             <span>
               <small>Pago</small>
-              <strong>{paymentLabel(paymentMethod, paymentProvider)}</strong>
+              <strong>
+                {requiresShippingQuote
+                  ? 'Se elige después de cotizar'
+                  : paymentLabel(paymentMethod, paymentProvider)}
+              </strong>
             </span>
           </div>
           <div className="orderSummary__total">
-            <span>Total estimado</span>
+            <span>{deliveryMethod === 'STORE_PICKUP' ? 'Total' : 'Subtotal antes de entrega'}</span>
             <strong>{formatMoney(cart.subtotalCents, cart.currency)}</strong>
           </div>
 
@@ -759,7 +806,10 @@ export function CheckoutExperience() {
               onClick={continueFromDelivery}
               type="button"
             >
-              Continuar a método de pago <ArrowRight aria-hidden="true" size={18} />
+              {requiresShippingQuote
+                ? 'Continuar a solicitar cotización'
+                : 'Continuar a método de pago'}{' '}
+              <ArrowRight aria-hidden="true" size={18} />
             </button>
           )}
           {step === 'payment' && (
@@ -772,7 +822,11 @@ export function CheckoutExperience() {
                 <span className="buttonSpinner" />
               ) : (
                 <>
-                  {paymentMethod === 'CARD' ? 'Ir al pago seguro' : 'Confirmar pedido'}
+                  {requiresShippingQuote
+                    ? 'Solicitar cotización y reservar'
+                    : paymentMethod === 'CARD'
+                      ? 'Ir al pago seguro'
+                      : 'Confirmar pedido'}
                   <ArrowRight aria-hidden="true" size={18} />
                 </>
               )}
@@ -831,24 +885,24 @@ function InlineAddressFields({
   return (
     <div className="inlineAddress">
       <div className="formGrid">
-        <AddressField field="recipientName" label="Recibe" onChange={update} value={address.recipientName} />
-        <AddressField field="phone" label="WhatsApp" maxLength={30} onChange={update} value={address.phone} />
+        <AddressField field="recipientName" label="Recibe" minLength={3} onChange={update} value={address.recipientName} />
+        <AddressField field="phone" inputMode="numeric" label="WhatsApp" maxLength={14} minLength={10} onChange={update} value={address.phone} />
       </div>
       <div className="formGrid formGrid--street">
-        <AddressField field="street" label="Calle" maxLength={160} onChange={update} value={address.street} />
+        <AddressField field="street" label="Calle" maxLength={160} minLength={3} onChange={update} value={address.street} />
         <AddressField field="exteriorNumber" label="Exterior" maxLength={20} onChange={update} value={address.exteriorNumber} />
         <AddressField field="interiorNumber" label="Interior" maxLength={20} onChange={update} required={false} value={address.interiorNumber} />
       </div>
-      <AddressField field="neighborhood" label="Colonia" maxLength={100} onChange={update} value={address.neighborhood} />
+      <AddressField field="neighborhood" label="Colonia" maxLength={100} minLength={2} onChange={update} value={address.neighborhood} />
       <div className="formGrid">
-        <AddressField field="city" label="Ciudad" maxLength={100} onChange={update} value={address.city} />
-        <AddressField field="municipality" label="Municipio" maxLength={100} onChange={update} required={false} value={address.municipality} />
+        <AddressField field="city" label="Ciudad" maxLength={100} minLength={2} onChange={update} value={address.city} />
+        <AddressField field="municipality" label="Municipio" maxLength={100} minLength={2} onChange={update} value={address.municipality} />
       </div>
       <div className="formGrid">
-        <AddressField field="state" label="Estado" maxLength={100} onChange={update} value={address.state} />
-        <AddressField field="postalCode" inputMode="numeric" label="Código postal" maxLength={10} onChange={update} value={address.postalCode} />
+        <AddressField field="state" label="Estado" maxLength={100} minLength={2} onChange={update} value={address.state} />
+        <AddressField field="postalCode" inputMode="numeric" label="Código postal" maxLength={5} minLength={5} onChange={update} value={address.postalCode} />
       </div>
-      <AddressField field="reference" label="Referencia" maxLength={300} onChange={update} required={false} value={address.reference} />
+      <AddressField field="reference" label="Referencia" maxLength={300} minLength={5} onChange={update} required={false} value={address.reference} />
     </div>
   );
 }
@@ -858,6 +912,7 @@ function AddressField({
   inputMode,
   label,
   maxLength = 120,
+  minLength,
   onChange,
   required = true,
   value,
@@ -866,6 +921,7 @@ function AddressField({
   inputMode?: 'numeric';
   label: string;
   maxLength?: number;
+  minLength?: number;
   onChange: (field: keyof CheckoutAddressDraft, value: string) => void;
   required?: boolean;
   value: string;
@@ -876,6 +932,7 @@ function AddressField({
       <input
         inputMode={inputMode}
         maxLength={maxLength}
+        minLength={minLength}
         onChange={(event) => onChange(field, event.target.value)}
         required={required}
         value={value}
@@ -894,18 +951,7 @@ function deliveryIssue(
   if (!newAddress) {
     return addressId ? null : 'Selecciona una dirección guardada o captura una nueva.';
   }
-  const required: Array<[keyof CheckoutAddressDraft, string]> = [
-    ['recipientName', 'quién recibe'],
-    ['phone', 'WhatsApp'],
-    ['street', 'calle'],
-    ['exteriorNumber', 'número exterior'],
-    ['neighborhood', 'colonia'],
-    ['city', 'ciudad'],
-    ['state', 'estado'],
-    ['postalCode', 'código postal'],
-  ];
-  const missing = required.find(([field]) => !address[field].trim());
-  return missing ? `Completa el campo ${missing[1]}.` : null;
+  return shippingAddressIssue(address)?.message ?? null;
 }
 
 function readStepFromUrl(): CheckoutStep | null {
@@ -917,9 +963,9 @@ function readStepFromUrl(): CheckoutStep | null {
 }
 
 function deliveryLabel(method: CheckoutDeliveryMethod) {
-  if (method === 'STORE_PICKUP') return 'Recoger en tienda';
-  if (method === 'LOCAL_DELIVERY') return 'Entrega local';
-  return 'Envío nacional';
+  if (method === 'STORE_PICKUP') return 'Recoger en tienda · sin costo';
+  if (method === 'LOCAL_DELIVERY') return 'Entrega local · por cotizar';
+  return 'Envío nacional · por cotizar';
 }
 
 function paymentLabel(

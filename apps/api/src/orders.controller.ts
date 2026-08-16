@@ -2,7 +2,12 @@ import { Body, Controller, Get, Headers, Param, Patch, Post, Query, Req, UseGuar
 import type { Request } from 'express';
 import { CustomerJwtAuthGuard } from './customer-auth.guard';
 import { AuthenticatedCustomer } from './customer-jwt.strategy';
-import { CreateOrderDto, ListCustomerOrdersDto, UpdatePendingOrderDto } from './order.dto';
+import {
+  CreateOrderDto,
+  ListCustomerOrdersDto,
+  SelectOrderPaymentDto,
+  UpdatePendingOrderDto,
+} from './order.dto';
 import { OrdersService } from './orders.service';
 
 type CustomerRequest = Request & { user: AuthenticatedCustomer };
@@ -38,6 +43,15 @@ export class OrdersController {
     @Req() request: CustomerRequest,
   ) {
     return this.orders.updatePendingCheckout(publicToken, input, request.user.customerId);
+  }
+
+  @Patch(':publicToken/payment-method')
+  selectPaymentMethod(
+    @Param('publicToken') publicToken: string,
+    @Body() input: SelectOrderPaymentDto,
+    @Req() request: CustomerRequest,
+  ) {
+    return this.orders.selectPaymentMethod(publicToken, input, request.user.customerId);
   }
 
   @Post(':publicToken/reopen-checkout')

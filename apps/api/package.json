@@ -11,7 +11,8 @@
     "prisma:deploy": "prisma migrate deploy",
     "prisma:studio": "prisma studio",
     "db:seed": "tsx prisma/seed.ts",
-    "test": "tsx --test src/*.spec.ts"
+    "test": "tsx --test src/*.spec.ts",
+    "test:smoke:shipping": "node scripts/smoke-shipping-payment.mjs"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "latest",

@@ -114,7 +114,7 @@ export function OrderTracking({ orderToken }: { orderToken: string }) {
 
   async function openPayment() {
     if (!order) return;
-    if (order.paymentMethod === 'CARD') {
+    if (!order.paymentMethod || order.paymentMethod === 'CARD') {
       window.location.assign(`/pago/${order.publicToken}`);
       return;
     }
@@ -267,8 +267,10 @@ export function OrderTracking({ orderToken }: { orderToken: string }) {
   );
   const latestProof = transferPayment?.transferProofs?.[0];
   const isTerminalOrder = ['CANCELLED', 'EXPIRED'].includes(order.status);
+  const waitingForShippingQuote = order.shippingQuoteStatus === 'PENDING';
   const showTransferPanel =
     !isTerminalOrder &&
+    !waitingForShippingQuote &&
     order.paymentMethod === 'BANK_TRANSFER' &&
     order.paymentStatus !== 'APPROVED';
 
@@ -294,12 +296,34 @@ export function OrderTracking({ orderToken }: { orderToken: string }) {
               status={order.paymentStatus}
               label={PAYMENT_STATUS_LABELS[order.paymentStatus] ?? order.paymentStatus}
             />
-            <strong>{formatMoney(order.totalCents, order.currency)}</strong>
+            <strong>
+              {waitingForShippingQuote
+                ? 'Total por confirmar'
+                : formatMoney(order.totalCents, order.currency)}
+            </strong>
           </div>
         </div>
       </header>
       <div className="orderLayout pageWidth">
         <div className="orderMain">
+          {waitingForShippingQuote && !isTerminalOrder && (
+            <section className="transferPaymentPanel">
+              <div className="transferPaymentPanel__heading">
+                <span><Truck size={20} /></span>
+                <div>
+                  <small className="eyebrow">Entrega por cotizar</small>
+                  <h2>Tu pedido está reservado.</h2>
+                </div>
+              </div>
+              <p>
+                La tienda confirmará el costo de entrega antes de habilitar el pago.
+                El total se actualizará automáticamente en la pantalla de cotización.
+              </p>
+              <Link className="button button--dark" href={`/pago/${order.publicToken}`}>
+                Ver estado de cotización <ArrowRight size={16} />
+              </Link>
+            </section>
+          )}
           {showTransferPanel && instruction && (
             <section className="transferPaymentPanel">
               <div className="transferPaymentPanel__heading">
@@ -464,8 +488,10 @@ export function OrderTracking({ orderToken }: { orderToken: string }) {
             {instruction && order.paymentMethod === 'CASH' && (
               <p>{instruction.instructions}</p>
             )}
-            {['CARD', 'PAYMENT_LINK'].includes(order.paymentMethod) &&
-              order.paymentStatus !== 'APPROVED' && (
+            {(!order.paymentMethod ||
+              ['CARD', 'PAYMENT_LINK'].includes(order.paymentMethod)) &&
+              order.paymentStatus !== 'APPROVED' &&
+              !waitingForShippingQuote && (
                 <button
                   className="button button--coral button--wide"
                   disabled={paying}
@@ -476,8 +502,8 @@ export function OrderTracking({ orderToken }: { orderToken: string }) {
                     <span className="buttonSpinner" />
                   ) : (
                     <>
-                      Continuar pago{' '}
-                      {order.paymentMethod === 'CARD' ? (
+                      {order.paymentMethod ? 'Continuar pago' : 'Elegir forma de pago'}{' '}
+                      {!order.paymentMethod || order.paymentMethod === 'CARD' ? (
                         <ArrowRight size={16} />
                       ) : (
                         <ExternalLink size={16} />
@@ -486,6 +512,11 @@ export function OrderTracking({ orderToken }: { orderToken: string }) {
                   )}
                 </button>
               )}
+            {waitingForShippingQuote && !isTerminalOrder && (
+              <Link className="button button--coral button--wide" href={`/pago/${order.publicToken}`}>
+                Esperando cotización <ArrowRight size={16} />
+              </Link>
+            )}
           </div>
           <div className="orderAddress">
             {isPickup ? <Store size={18} /> : <MapPin size={18} />}

@@ -1,11 +1,17 @@
 import { randomUUID } from 'node:crypto';
-import { Injectable, NotFoundException, ServiceUnavailableException } from '@nestjs/common';
+import {
+  ConflictException,
+  Injectable,
+  NotFoundException,
+  ServiceUnavailableException,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { GetObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
-import { PaymentMethod } from '@prisma/client';
+import { OrderStatus, PaymentMethod, PaymentStatus } from '@prisma/client';
 import { PresignTransferProofDto } from './payment.dto';
 import { PrismaService } from './prisma.service';
+import { isShippingQuoteReadyForPayment } from './shipping-quote';
 
 @Injectable()
 export class StorageService {
@@ -17,10 +23,30 @@ export class StorageService {
   async presignTransferProof(input: PresignTransferProofDto, customerId: string) {
     const order = await this.prisma.order.findFirst({
       where: { publicToken: input.orderToken, customerId },
-      select: { id: true, paymentMethod: true },
+      select: {
+        id: true,
+        status: true,
+        paymentMethod: true,
+        paymentStatus: true,
+        deliveryMethod: true,
+        shippingQuoteStatus: true,
+        expiresAt: true,
+      },
     });
     if (!order || order.paymentMethod !== PaymentMethod.BANK_TRANSFER) {
       throw new NotFoundException('Orden de transferencia no encontrada.');
+    }
+    if (!isShippingQuoteReadyForPayment(order.deliveryMethod, order.shippingQuoteStatus)) {
+      throw new ConflictException(
+        'La tienda debe confirmar el costo de entrega antes de recibir el comprobante.',
+      );
+    }
+    if (
+      order.status !== OrderStatus.PENDING_PAYMENT ||
+      order.paymentStatus === PaymentStatus.APPROVED ||
+      (order.expiresAt && order.expiresAt <= new Date())
+    ) {
+      throw new ConflictException('La reserva de la orden ya no esta activa.');
     }
 
     const bucket = this.requireConfig('STORAGE_PRIVATE_BUCKET');

@@ -259,7 +259,7 @@ export type Order = {
   status: string;
   paymentStatus: string;
   fulfillmentStatus: string;
-  paymentMethod: string;
+  paymentMethod: string | null;
   deliveryMethod: string;
   currency: string;
   subtotalCents: number;
@@ -290,6 +290,8 @@ export type Order = {
     provider: string;
     method: string;
     status: string;
+    amountCents: number;
+    currency: string;
     checkoutUrl?: string | null;
     transferProofs?: Array<{
       id: string;
