@@ -102,6 +102,10 @@ echo "Iniciando servicios de datos..."
 "${COMPOSE[@]}" up -d --wait postgres redis minio
 "${COMPOSE[@]}" run --rm minio-init
 
+echo "Creando respaldos previos de base de datos y archivos..."
+"${SCRIPT_DIR}/backup-postgres.sh"
+"${SCRIPT_DIR}/backup-minio.sh"
+
 echo "Aplicando migraciones..."
 "${COMPOSE[@]}" run --rm migrate
 

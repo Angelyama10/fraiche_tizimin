@@ -118,6 +118,11 @@ despliegues posteriores ejecuta solo:
 ./deploy/deploy.sh
 ```
 
+El despliegue normal crea primero un respaldo de PostgreSQL y una copia de los
+dos buckets de MinIO. Si alguno falla, las migraciones y la publicación no
+comienzan. No uses `--seed` ni `--reset-store-data` para una actualización de
+código que deba conservar catálogo, clientes, pedidos, contenido e imágenes.
+
 Caddy solicitara y renovara automaticamente los certificados HTTPS. Verifica:
 
 ```bash
@@ -127,16 +132,18 @@ docker compose --env-file deploy/production.env -f compose.production.yml ps
 
 ## 6. Respaldos
 
-Crea un respaldo manual:
+Crea respaldos manuales de la base y los archivos:
 
 ```bash
 ./deploy/backup-postgres.sh
+./deploy/backup-minio.sh
 ```
 
 Programa uno diario con `crontab -e`:
 
 ```cron
 15 3 * * * /opt/fraiche/deploy/backup-postgres.sh >> /opt/fraiche/deploy/backups/backup.log 2>&1
+45 3 * * * /opt/fraiche/deploy/backup-minio.sh >> /opt/fraiche/deploy/backups/backup.log 2>&1
 ```
 
 Los respaldos locales conservan 14 dias. En produccion tambien deben copiarse cifrados a un destino externo.

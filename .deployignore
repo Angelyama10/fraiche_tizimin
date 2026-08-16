@@ -1,0 +1,14 @@
+.git/
+.github/
+.codex/
+.env
+.env.*
+deploy/production.env
+deploy/backups/
+node_modules/
+.pnpm-store/
+.next/
+dist/
+*.tsbuildinfo
+outputs/
+.DS_Store

@@ -48,6 +48,10 @@ jobs:
             printf 'Faltan secretos de produccion: %s\n' "${missing[*]}" >&2
             exit 1
           fi
+          if [[ "${IONOS_DEPLOY_PATH}" != '/opt/fraiche' ]]; then
+            printf 'IONOS_DEPLOY_PATH debe ser exactamente /opt/fraiche. Valor recibido: %s\n' "${IONOS_DEPLOY_PATH}" >&2
+            exit 1
+          fi
 
       - name: Preparar acceso SSH
         env:
@@ -59,6 +63,16 @@ jobs:
           chmod 0600 ~/.ssh/ionos
           printf '%s\n' "$SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
 
+      - name: Verificar destino remoto
+        env:
+          IONOS_HOST: ${{ secrets.IONOS_HOST }}
+          IONOS_USER: ${{ secrets.IONOS_USER }}
+          IONOS_DEPLOY_PATH: ${{ secrets.IONOS_DEPLOY_PATH }}
+          IONOS_PORT: 22022
+        run: |
+          ssh -p "${IONOS_PORT}" -i ~/.ssh/ionos "${IONOS_USER}@${IONOS_HOST}" \
+            "test '${IONOS_DEPLOY_PATH}' = '/opt/fraiche' && test -f '/opt/fraiche/compose.production.yml' && test -f '/opt/fraiche/deploy/production.env'"
+
       - name: Sincronizar codigo
         env:
           IONOS_HOST: ${{ secrets.IONOS_HOST }}
@@ -66,15 +80,8 @@ jobs:
           IONOS_DEPLOY_PATH: ${{ secrets.IONOS_DEPLOY_PATH }}
           IONOS_PORT: 22022
         run: |
-          rsync -az --delete \
-            --exclude '.git/' \
-            --exclude '.env' \
-            --exclude '.env.*' \
-            --exclude 'deploy/production.env' \
-            --exclude 'deploy/backups/' \
-            --exclude 'node_modules/' \
-            --exclude '.next/' \
-            --exclude 'dist/' \
+          rsync -rlpzc --delete-delay --itemize-changes \
+            --exclude-from='.deployignore' \
             -e "ssh -p ${IONOS_PORT} -i ~/.ssh/ionos" \
             ./ "${IONOS_USER}@${IONOS_HOST}:${IONOS_DEPLOY_PATH}/"
 
