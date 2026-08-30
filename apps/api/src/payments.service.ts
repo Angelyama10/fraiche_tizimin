@@ -1189,13 +1189,23 @@ export class PaymentsService {
         paidAt: new Date(),
       },
     });
-    await transaction.outboxEvent.create({
-      data: {
-        type: 'PAYMENT_APPROVED',
-        aggregateType: 'Order',
-        aggregateId: order.id,
-        payload: { orderId: order.id, paymentId },
-      },
+    await transaction.outboxEvent.createMany({
+      data: [
+        {
+          type: 'PAYMENT_APPROVED',
+          aggregateType: 'Order',
+          aggregateId: order.id,
+          deduplicationKey: `PAYMENT_APPROVED:${paymentId}:ADMIN`,
+          payload: { orderId: order.id, paymentId },
+        },
+        {
+          type: 'ORDER_PAYMENT_CONFIRMED',
+          aggregateType: 'Order',
+          aggregateId: order.id,
+          deduplicationKey: `PAYMENT_APPROVED:${paymentId}:CUSTOMER`,
+          payload: { orderId: order.id, paymentId },
+        },
+      ],
     });
   }
 

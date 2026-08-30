@@ -33,10 +33,7 @@ export class InventoryAlertsService {
 
       for (const level of levels) {
         try {
-          const alert = await this.ensureAlert(level);
-          if (alert.status === InventoryAlertStatus.OPEN) {
-            await this.ensureDailyReminder(alert.id);
-          }
+          await this.ensureAlert(level);
         } catch (error) {
           this.logger.error(
             `No se pudo actualizar la alerta de ${level.id}: ${
@@ -120,25 +117,6 @@ export class InventoryAlertsService {
         });
       }
       throw error;
-    }
-  }
-
-  private async ensureDailyReminder(alertId: string) {
-    const day = new Date().toISOString().slice(0, 10);
-    try {
-      await this.prisma.outboxEvent.create({
-        data: {
-          type: 'LOW_STOCK_ALERT',
-          aggregateType: 'InventoryAlert',
-          aggregateId: alertId,
-          deduplicationKey: `LOW_STOCK:${alertId}:${day}`,
-          payload: { alertId },
-        },
-      });
-    } catch (error) {
-      if (!(error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002')) {
-        throw error;
-      }
     }
   }
 

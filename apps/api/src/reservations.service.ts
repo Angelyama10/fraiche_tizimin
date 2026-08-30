@@ -94,7 +94,7 @@ export class ReservationsService {
               data: { releasedAt: new Date() },
             });
           }
-          await transaction.order.updateMany({
+          const expiredOrder = await transaction.order.updateMany({
             where: {
               id: reservation.orderItem.orderId,
               status: {
@@ -111,6 +111,20 @@ export class ReservationsService {
               paymentStatus: PaymentStatus.CANCELLED,
             },
           });
+          if (expiredOrder.count) {
+            await transaction.outboxEvent.create({
+              data: {
+                type: 'ORDER_STATUS_UPDATED',
+                aggregateType: 'Order',
+                aggregateId: reservation.orderItem.orderId,
+                deduplicationKey: `ORDER_STATUS:${reservation.orderItem.orderId}:${OrderStatus.EXPIRED}`,
+                payload: {
+                  orderId: reservation.orderItem.orderId,
+                  status: OrderStatus.EXPIRED,
+                },
+              },
+            });
+          }
           await transaction.payment.updateMany({
             where: {
               orderId: reservation.orderItem.orderId,

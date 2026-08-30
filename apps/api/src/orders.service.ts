@@ -769,7 +769,20 @@ export class OrdersService {
           where: { publicToken, ...(customerId ? { customerId } : {}) },
         });
         if (!order) throw new NotFoundException('Orden no encontrada.');
+        const shouldNotify =
+          order.status !== OrderStatus.CANCELLED && order.status !== OrderStatus.EXPIRED;
         await this.cancelOrderInTransaction(transaction, order);
+        if (shouldNotify) {
+          await transaction.outboxEvent.create({
+            data: {
+              type: 'ORDER_STATUS_UPDATED',
+              aggregateType: 'Order',
+              aggregateId: order.id,
+              deduplicationKey: `ORDER_STATUS:${order.id}:${OrderStatus.CANCELLED}`,
+              payload: { orderId: order.id, status: OrderStatus.CANCELLED },
+            },
+          });
+        }
       },
       { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
     );
@@ -1202,13 +1215,23 @@ export class OrdersService {
       });
     }
 
-    await transaction.outboxEvent.create({
-      data: {
-        type: 'ORDER_CREATED',
-        aggregateType: 'Order',
-        aggregateId: order.id,
-        payload: { orderId: order.id, publicToken: order.publicToken },
-      },
+    await transaction.outboxEvent.createMany({
+      data: [
+        {
+          type: 'ORDER_CREATED',
+          aggregateType: 'Order',
+          aggregateId: order.id,
+          deduplicationKey: `ORDER_CREATED:${order.id}:ADMIN`,
+          payload: { orderId: order.id, publicToken: order.publicToken },
+        },
+        {
+          type: 'ORDER_RECEIVED',
+          aggregateType: 'Order',
+          aggregateId: order.id,
+          deduplicationKey: `ORDER_CREATED:${order.id}:CUSTOMER`,
+          payload: { orderId: order.id, publicToken: order.publicToken },
+        },
+      ],
     });
 
     return order.publicToken;

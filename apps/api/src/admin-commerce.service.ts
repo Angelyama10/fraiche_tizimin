@@ -515,6 +515,15 @@ export class AdminCommerceService {
             expiresAt,
           },
         });
+        await transaction.outboxEvent.create({
+          data: {
+            type: 'SHIPPING_QUOTE_READY',
+            aggregateType: 'Order',
+            aggregateId: order.id,
+            deduplicationKey: `SHIPPING_QUOTE:${order.id}:${now.toISOString()}`,
+            payload: { orderId: order.id, shippingCents, totalCents, expiresAt },
+          },
+        });
         await transaction.adminNotification.updateMany({
           where: {
             orderId: order.id,
