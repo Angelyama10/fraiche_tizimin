@@ -6,6 +6,7 @@ import { OutboxStatus } from '@prisma/client';
 import {
   EMAIL_NOTIFICATION_TYPES,
   isEmailNotificationType,
+  isSmtpAuthenticationError,
   OutboxService,
 } from './outbox.service';
 import { PrismaService } from './prisma.service';
@@ -22,6 +23,16 @@ test('solo autoriza correos de pedidos y correos funcionales de cuenta', () => {
   assert.equal(isEmailNotificationType('ORDER_PAYMENT_METHOD_SELECTED'), false);
   assert.equal(isEmailNotificationType('ORDER_CHECKOUT_REOPENED'), false);
   assert.equal(isEmailNotificationType('UNKNOWN_EVENT'), false);
+});
+
+test('reconoce el rechazo de credenciales de Gmail para conservar la cola', () => {
+  assert.equal(
+    isSmtpAuthenticationError(
+      new Error('Invalid login: 535-5.7.8 Username and Password not accepted.'),
+    ),
+    true,
+  );
+  assert.equal(isSmtpAuthenticationError(new Error('Connection timed out')), false);
 });
 
 test('suprime eventos no autorizados incluso si SMTP no esta configurado', async () => {

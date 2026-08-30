@@ -24,6 +24,7 @@ type ClaimedEvent = {
 };
 
 const SMTP_DAILY_LIMIT_COOLDOWN_MS = 24 * 60 * 60 * 1000;
+const SMTP_AUTHENTICATION_COOLDOWN_MS = 24 * 60 * 60 * 1000;
 const SUPPRESSED_EMAIL_REASON =
   'Correo suprimido por la politica de notificaciones: no corresponde al flujo de pedidos.';
 
@@ -45,6 +46,15 @@ const emailNotificationTypes = new Set<string>(EMAIL_NOTIFICATION_TYPES);
 
 export function isEmailNotificationType(type: string) {
   return emailNotificationTypes.has(type);
+}
+
+export function isSmtpAuthenticationError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+  return (
+    /535(?:-| )5\.7\.8/i.test(message) ||
+    /invalid login/i.test(message) ||
+    /username and password not accepted/i.test(message)
+  );
 }
 
 @Injectable()
@@ -105,8 +115,13 @@ export class OutboxService implements OnModuleInit {
             data: { status: OutboxStatus.SENT, processedAt: new Date(), lastError: null },
           });
         } catch (error) {
-          if (this.isDailySendingLimitError(error)) {
-            const availableAt = new Date(Date.now() + SMTP_DAILY_LIMIT_COOLDOWN_MS);
+          const dailyLimitReached = this.isDailySendingLimitError(error);
+          const authenticationRejected = isSmtpAuthenticationError(error);
+          if (dailyLimitReached || authenticationRejected) {
+            const cooldownMs = dailyLimitReached
+              ? SMTP_DAILY_LIMIT_COOLDOWN_MS
+              : SMTP_AUTHENTICATION_COOLDOWN_MS;
+            const availableAt = new Date(Date.now() + cooldownMs);
             this.smtpPausedUntil = availableAt;
             await this.prisma.outboxEvent.update({
               where: { id: event.id },
@@ -118,7 +133,9 @@ export class OutboxService implements OnModuleInit {
               },
             });
             this.logger.warn(
-              `Gmail alcanzo su limite diario. Notificaciones pausadas hasta ${availableAt.toISOString()}.`,
+              dailyLimitReached
+                ? `Gmail alcanzo su limite diario. Notificaciones pausadas hasta ${availableAt.toISOString()}.`
+                : `Gmail rechazo la autenticacion. Notificaciones conservadas y pausadas hasta ${availableAt.toISOString()}.`,
             );
             continue;
           }
